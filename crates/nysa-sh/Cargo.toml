@@ -1,0 +1,11 @@
+[package]
+name = "nysa-sh"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nysa-core = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+sea-orm = { workspace = true }
+anyhow = { workspace = true }
