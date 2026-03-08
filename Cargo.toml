@@ -11,4 +11,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "chrono"] }
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "signal"] }
 sea-orm = { version = "2.0.0-rc.36", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "schema-sync", "entity-registry"] }
 anyhow = "1.0.102"
+async-openai = "0.29"
+reqwest = "0.12"
+secrecy = "0.10"
 nysa-core = { path = "crates/nysa-core" }

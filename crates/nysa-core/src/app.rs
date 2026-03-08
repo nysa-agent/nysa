@@ -1,3 +1,4 @@
+use crate::config::{AiConfig, Config, ExtensionConfigRegistry};
 use sea_orm::DatabaseConnection;
 use tracing::{Subscriber, error, info};
 use tracing_subscriber::{
@@ -8,15 +9,16 @@ use tracing_subscriber::{
 
 pub struct App {
     pub database: DatabaseConnection,
+    pub config: Config,
 }
 
 impl App {
+    pub fn builder(db: DatabaseConnection) -> AppBuilder {
+        AppBuilder::new(db)
+    }
+
     pub async fn init(db: DatabaseConnection) -> anyhow::Result<Self> {
-        Self::init_logging();
-
-        Self::sync_database(&db).await?;
-
-        Ok(Self { database: db })
+        Self::builder(db).build().await
     }
 
     fn init_logging() {
@@ -42,6 +44,53 @@ impl App {
         }
 
         Ok(())
+    }
+
+    pub fn ai(&self) -> Option<&AiConfig> {
+        self.config.ai.as_ref()
+    }
+
+    pub fn extensions(&self) -> &ExtensionConfigRegistry {
+        &self.config.extensions
+    }
+}
+
+pub struct AppBuilder {
+    database: DatabaseConnection,
+    config: Config,
+}
+
+impl AppBuilder {
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self {
+            database: db,
+            config: Config::default(),
+        }
+    }
+
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = config;
+        self
+    }
+
+    pub fn ai(mut self, ai_config: AiConfig) -> Self {
+        self.config.ai = Some(ai_config);
+        self
+    }
+
+    pub fn extension<T: crate::config::ExtensionConfig>(mut self, config: T) -> Self {
+        self.config.extensions.register(config);
+        self
+    }
+
+    pub async fn build(self) -> anyhow::Result<App> {
+        App::init_logging();
+        App::sync_database(&self.database).await?;
+
+        Ok(App {
+            database: self.database,
+            config: self.config,
+        })
     }
 }
 

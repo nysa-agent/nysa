@@ -9,3 +9,6 @@ tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 sea-orm = { workspace = true }
 anyhow = { workspace = true }
+async-openai = { workspace = true }
+reqwest = { workspace = true }
+secrecy = { workspace = true }
