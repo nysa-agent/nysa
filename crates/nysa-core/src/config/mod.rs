@@ -7,6 +7,7 @@ pub use ai::{
 };
 pub use extensions::{ExtensionConfig, ExtensionConfigRegistry};
 
+#[derive(Clone)]
 pub struct Config {
     pub ai: Option<AiConfig>,
     pub extensions: ExtensionConfigRegistry,

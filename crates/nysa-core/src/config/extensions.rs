@@ -1,14 +1,19 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+
 pub struct ExtensionConfigRegistry {
     configs: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    raw_configs: HashMap<String, toml::Value>,
 }
 
 impl ExtensionConfigRegistry {
     pub fn new() -> Self {
         Self {
             configs: HashMap::new(),
+            raw_configs: HashMap::new(),
         }
     }
 
@@ -46,6 +51,28 @@ impl ExtensionConfigRegistry {
     pub fn is_empty(&self) -> bool {
         self.configs.is_empty()
     }
+
+    pub fn register_raw(&mut self, name: impl Into<String>, config: toml::Value) {
+        self.raw_configs.insert(name.into(), config);
+    }
+
+    pub fn get_raw(&self, name: &str) -> Option<&toml::Value> {
+        self.raw_configs.get(name)
+    }
+
+    pub fn deserialize<T: DeserializeOwned + ExtensionConfig + Clone>(
+        &mut self,
+        name: &str,
+    ) -> Option<T> {
+        let raw = self.raw_configs.get(name)?;
+        let config: T = raw.clone().try_into().ok()?;
+        self.register(config.clone());
+        Some(config)
+    }
+
+    pub fn raw_config_names(&self) -> Vec<&str> {
+        self.raw_configs.keys().map(|s| s.as_str()).collect()
+    }
 }
 
 impl Default for ExtensionConfigRegistry {
@@ -72,4 +99,45 @@ impl ExtensionConfigRegistry {
     pub fn get_extension<T: ExtensionConfig>(&self) -> Option<&T> {
         self.get::<T>()
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExtensionsToml {
+    #[serde(flatten)]
+    pub extensions: HashMap<String, toml::Value>,
+}
+
+impl ExtensionsToml {
+    pub fn new() -> Self {
+        Self {
+            extensions: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, name: impl Into<String>, config: toml::Value) {
+        self.extensions.insert(name.into(), config);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&toml::Value> {
+        self.extensions.get(name)
+    }
+
+    pub fn into_registry(self) -> ExtensionConfigRegistry {
+        let mut registry = ExtensionConfigRegistry::new();
+        for (name, config) in self.extensions {
+            registry.register_raw(name, config);
+        }
+        registry
+    }
+}
+
+pub fn load_extensions_from_toml(toml_str: &str) -> Result<ExtensionsToml, toml::de::Error> {
+    toml::from_str(toml_str)
+}
+
+pub fn load_extensions_from_file(
+    path: impl AsRef<std::path::Path>,
+) -> std::io::Result<ExtensionsToml> {
+    let content = std::fs::read_to_string(path)?;
+    load_extensions_from_toml(&content).map_err(std::io::Error::other)
 }

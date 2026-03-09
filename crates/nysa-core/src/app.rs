@@ -1,15 +1,27 @@
-use crate::config::{AiConfig, Config, ExtensionConfigRegistry};
+use std::sync::Arc;
+use std::time::Duration;
+
 use sea_orm::DatabaseConnection;
-use tracing::{Subscriber, error, info};
+use tokio::sync::RwLock;
+use tracing::{error, info, Subscriber};
 use tracing_subscriber::{
     EnvFilter,
     fmt::{FormatEvent, FormatFields},
     registry::LookupSpan,
 };
 
+use crate::config::{AiConfig, Config};
+use crate::extension::{EventBus, Extension, ExtensionContext, ExtensionManager};
+use crate::tool::{ToolDefinition, ToolHandler, ToolRegistry};
+
+const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub struct App {
     pub database: DatabaseConnection,
     pub config: Config,
+    extensions: ExtensionManager,
+    tool_registry: Arc<RwLock<ToolRegistry>>,
+    event_bus: Arc<EventBus>,
 }
 
 impl App {
@@ -50,14 +62,37 @@ impl App {
         self.config.ai.as_ref()
     }
 
-    pub fn extensions(&self) -> &ExtensionConfigRegistry {
-        &self.config.extensions
+    pub fn extensions(&self) -> &ExtensionManager {
+        &self.extensions
+    }
+
+    pub fn tool_registry(&self) -> Arc<RwLock<ToolRegistry>> {
+        self.tool_registry.clone()
+    }
+
+    pub fn event_bus(&self) -> Arc<EventBus> {
+        self.event_bus.clone()
+    }
+
+    pub async fn run(&self) -> anyhow::Result<()> {
+        info!("Nysa is running...");
+        Ok(())
+    }
+
+    pub async fn shutdown(mut self) -> anyhow::Result<()> {
+        info!("Shutting down Nysa...");
+        self.extensions.stop_all().await?;
+        info!("Shutdown complete");
+        Ok(())
     }
 }
 
 pub struct AppBuilder {
     database: DatabaseConnection,
     config: Config,
+    extensions: ExtensionManager,
+    tool_registry: ToolRegistry,
+    shutdown_timeout: Duration,
 }
 
 impl AppBuilder {
@@ -65,6 +100,9 @@ impl AppBuilder {
         Self {
             database: db,
             config: Config::default(),
+            extensions: ExtensionManager::new(),
+            tool_registry: ToolRegistry::new(),
+            shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
         }
     }
 
@@ -78,18 +116,47 @@ impl AppBuilder {
         self
     }
 
-    pub fn extension<T: crate::config::ExtensionConfig>(mut self, config: T) -> Self {
-        self.config.extensions.register(config);
+    pub fn extension<E: Extension>(mut self, extension: E) -> Self {
+        self.extensions.register(extension);
         self
     }
 
-    pub async fn build(self) -> anyhow::Result<App> {
+    pub fn tool<H: ToolHandler + 'static>(mut self, definition: ToolDefinition, handler: H) -> Self {
+        self.tool_registry.register(definition, handler);
+        self
+    }
+
+    pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
+        self.shutdown_timeout = timeout;
+        self
+    }
+
+    pub async fn build(mut self) -> anyhow::Result<App> {
         App::init_logging();
         App::sync_database(&self.database).await?;
+
+        let event_bus = Arc::new(EventBus::new());
+
+        self.extensions.register_tools(&mut self.tool_registry).await;
+
+        let tool_registry = Arc::new(RwLock::new(self.tool_registry));
+
+        let ctx = ExtensionContext::new(
+            self.database.clone(),
+            self.config.clone(),
+            self.extensions.cancellation_token(),
+        );
+
+        self.extensions.start_all(&ctx).await?;
+
+        info!("Nysa initialized successfully");
 
         Ok(App {
             database: self.database,
             config: self.config,
+            extensions: self.extensions,
+            tool_registry,
+            event_bus,
         })
     }
 }

@@ -1,16 +1,18 @@
 use anyhow::anyhow;
 use async_openai::types::{EncodingFormat, Stop};
-use reqwest::header::{AUTHORIZATION, HeaderMap};
+use reqwest::header::{HeaderMap, AUTHORIZATION};
 use secrecy::{ExposeSecret, SecretString};
 
 const NYSA_REFERER: &str = "https://nysa.phrolova.moe/";
 const NYSA_TITLE: &str = "Nysa";
 
+#[derive(Clone)]
 pub struct AiConfig {
     pub chat: ChatConfig,
     pub embedding: EmbeddingConfig,
 }
 
+#[derive(Clone)]
 pub struct ChatConfig {
     pub base_url: String,
     pub api_key: String,
@@ -18,6 +20,7 @@ pub struct ChatConfig {
     pub options: ChatOptions,
 }
 
+#[derive(Clone)]
 pub struct ChatOptions {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -45,6 +48,14 @@ impl ChatConfig {
         &self,
         messages: Vec<async_openai::types::ChatCompletionRequestMessage>,
     ) -> async_openai::types::CreateChatCompletionRequest {
+        self.to_openai_request_with_tools(messages, None)
+    }
+
+    pub fn to_openai_request_with_tools(
+        &self,
+        messages: Vec<async_openai::types::ChatCompletionRequestMessage>,
+        tools: Option<Vec<async_openai::types::ChatCompletionTool>>,
+    ) -> async_openai::types::CreateChatCompletionRequest {
         use async_openai::types::CreateChatCompletionRequest;
 
         let mut request = CreateChatCompletionRequest {
@@ -71,6 +82,9 @@ impl ChatConfig {
         if !self.options.stop_sequences.is_empty() {
             request.stop = Some(Stop::StringArray(self.options.stop_sequences.clone()));
         }
+        if let Some(tools) = tools {
+            request.tools = Some(tools);
+        }
 
         request
     }
@@ -83,6 +97,7 @@ impl ChatConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct EmbeddingConfig {
     pub base_url: String,
     pub api_key: String,
