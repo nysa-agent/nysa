@@ -22,14 +22,14 @@ pub struct ExtensionContext {
 impl ExtensionContext {
     pub fn new(
         database: DatabaseConnection,
-        config: Config,
+        config: Arc<Config>,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             tool_registry: Arc::new(RwLock::new(ToolRegistry::new())),
             database: Arc::new(database),
             event_bus: Arc::new(EventBus::new()),
-            config: Arc::new(config),
+            config,
             cancellation_token,
             state: parking_lot::RwLock::new(HashMap::new()),
         }

@@ -18,7 +18,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct App {
     pub database: DatabaseConnection,
-    pub config: Config,
+    pub config: Arc<Config>,
     extensions: ExtensionManager,
     tool_registry: Arc<RwLock<ToolRegistry>>,
     event_bus: Arc<EventBus>,
@@ -141,9 +141,11 @@ impl AppBuilder {
 
         let tool_registry = Arc::new(RwLock::new(self.tool_registry));
 
+        let config = Arc::new(self.config);
+        
         let ctx = ExtensionContext::new(
             self.database.clone(),
-            self.config.clone(),
+            config.clone(),
             self.extensions.cancellation_token(),
         );
 
@@ -153,7 +155,7 @@ impl AppBuilder {
 
         Ok(App {
             database: self.database,
-            config: self.config,
+            config,
             extensions: self.extensions,
             tool_registry,
             event_bus,
