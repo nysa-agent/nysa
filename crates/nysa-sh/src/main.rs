@@ -2,8 +2,8 @@ use std::any::Any;
 
 use nysa_core::async_trait;
 use nysa_core::{
-    App, Extension, ExtensionDef, ExtensionError, ExtensionFactoryRegistry, PropertyType,
-    SchemaBuilder, ToolDefinition, ToolError, ToolHandler, ToolResult,
+    App, Extension, ExtensionDef, ExtensionError, PropertyType, SchemaBuilder, ToolDefinition,
+    ToolError, ToolHandler, ToolResult,
 };
 use sea_orm::Database;
 use serde::{Deserialize, Serialize};
@@ -116,33 +116,9 @@ async fn main() -> anyhow::Result<()> {
         let registry = app.tool_registry();
         let registry = registry.read().await;
         for tool in registry.all() {
-            println!("  • {} ({}) - {}", tool.name, tool.category, tool.description);
+            println!("{} ({}) - {}", tool.name, tool.category, tool.description);
         }
-        println!("\nCategories: {:?}", registry.categories());
     }
-
-    // Method 2: Factory-based (for Nysa Cloud)
-    println!("\n--- Factory Demo ---");
-    let mut factory = ExtensionFactoryRegistry::new();
-    factory.register::<ExampleExtension>();
-
-    println!("Known extensions: {:?}", factory.known_extensions());
-    println!(
-        "Extension descriptions: {:?}",
-        factory.extension_descriptions()
-    );
-
-    let config_json = serde_json::json!({
-        "prefix": "cloud",
-        "enabled": true
-    });
-
-    if let Some(_ext) = factory.create_or_warn("example", config_json) {
-        println!("Successfully created extension via factory!");
-    }
-
-    // Unknown extension - logs warning
-    factory.create_or_warn("unknown", serde_json::json!({}));
 
     Ok(())
 }
