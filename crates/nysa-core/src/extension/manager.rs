@@ -49,7 +49,7 @@ impl ExtensionManager {
 
     pub fn register<E: Extension>(&mut self, extension: E) {
         let type_id = TypeId::of::<E>();
-        let holder: ExtensionHolder = Arc::new(extension);
+        let holder: ExtensionHolder = Arc::new(extension) as Arc<dyn Extension>;
         self.extensions.insert(type_id, holder);
     }
 
