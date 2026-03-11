@@ -10,6 +10,8 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
+use crate::auth::AuthService;
+use crate::compaction::CompactionManager;
 use crate::config::{AiConfig, Config};
 use crate::extension::{EventBus, Extension, ExtensionContext, ExtensionManager};
 use crate::tool::{ToolDefinition, ToolHandler, ToolRegistry};
@@ -143,11 +145,16 @@ impl AppBuilder {
 
         let config = Arc::new(self.config);
         
+        let auth_service = AuthService::new(self.database.clone());
+        let compaction_manager = CompactionManager::new(self.database.clone());
+
         let ctx = ExtensionContext::new(
             self.database.clone(),
             config.clone(),
             self.extensions.cancellation_token(),
-        );
+        )
+        .with_auth_service(auth_service)
+        .with_compaction_manager(compaction_manager);
 
         self.extensions.start_all(&ctx).await?;
 

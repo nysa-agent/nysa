@@ -6,6 +6,8 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
+use crate::auth::AuthService;
+use crate::compaction::CompactionManager;
 use crate::config::Config;
 use crate::extension::event::{EventBus, SharedEventBus};
 use crate::tool::ToolRegistry;
@@ -16,6 +18,8 @@ pub struct ExtensionContext {
     pub event_bus: SharedEventBus,
     pub config: Arc<Config>,
     pub cancellation_token: CancellationToken,
+    auth_service: Option<Arc<AuthService>>,
+    compaction_manager: Option<Arc<CompactionManager>>,
     state: parking_lot::RwLock<HashMap<TypeId, Arc<dyn std::any::Any + Send + Sync>>>,
 }
 
@@ -31,8 +35,28 @@ impl ExtensionContext {
             event_bus: Arc::new(EventBus::new()),
             config,
             cancellation_token,
+            auth_service: None,
+            compaction_manager: None,
             state: parking_lot::RwLock::new(HashMap::new()),
         }
+    }
+
+    pub fn with_auth_service(mut self, service: AuthService) -> Self {
+        self.auth_service = Some(Arc::new(service));
+        self
+    }
+
+    pub fn with_compaction_manager(mut self, manager: CompactionManager) -> Self {
+        self.compaction_manager = Some(Arc::new(manager));
+        self
+    }
+    
+    pub fn auth(&self) -> Option<&Arc<AuthService>> {
+        self.auth_service.as_ref()
+    }
+
+    pub fn compaction(&self) -> Option<&Arc<CompactionManager>> {
+        self.compaction_manager.as_ref()
     }
     
     pub fn store<T: 'static + Send + Sync>(&self, value: T) {
@@ -74,6 +98,8 @@ impl Clone for ExtensionContext {
             event_bus: self.event_bus.clone(),
             config: self.config.clone(),
             cancellation_token: self.cancellation_token.clone(),
+            auth_service: self.auth_service.clone(),
+            compaction_manager: self.compaction_manager.clone(),
             state: parking_lot::RwLock::new(HashMap::new()),
         }
     }

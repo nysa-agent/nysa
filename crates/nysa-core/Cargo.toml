@@ -21,3 +21,7 @@ futures = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
 uuid = { workspace = true }
+sha2 = { workspace = true }
+base58 = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
