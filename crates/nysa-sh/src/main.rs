@@ -1,124 +1,141 @@
-use std::any::Any;
+use std::path::PathBuf;
 
-use nysa_core::async_trait;
-use nysa_core::{
-    App, Extension, ExtensionDef, ExtensionError, PropertyType, SchemaBuilder, ToolDefinition,
-    ToolError, ToolHandler, ToolResult,
-};
+use clap::Parser;
+use nysa_core::App;
+use nysa_discord::models::{ChannelMode, DmMode};
+use nysa_discord::{DiscordExtension, DiscordExtensionConfig, UnauthMessage};
 use sea_orm::Database;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-struct EchoHandler;
-
-#[async_trait]
-impl ToolHandler for EchoHandler {
-    async fn execute(&self, args: serde_json::Value) -> Result<ToolResult, ToolError> {
-        let message = args
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("no message");
-        Ok(ToolResult::success(format!("Echo: {}", message)))
-    }
+#[derive(Parser, Debug)]
+#[command(name = "nysa")]
+#[command(about = "Nysa AI Agent Framework", long_about = None)]
+struct Args {
+    /// Path to config file
+    #[arg(short, long, default_value = "config.toml")]
+    config: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExampleConfig {
-    pub prefix: String,
-    pub enabled: bool,
+#[derive(Debug, Clone, Deserialize)]
+struct Config {
+    database: DatabaseConfig,
+    discord: DiscordConfigSection,
 }
 
-pub struct ExampleExtension {
-    config: ExampleConfig,
+#[derive(Debug, Clone, Deserialize)]
+struct DatabaseConfig {
+    url: String,
 }
 
-impl ExampleExtension {
-    fn new(config: ExampleConfig) -> Self {
-        Self { config }
-    }
+#[derive(Debug, Clone, Deserialize)]
+struct DiscordConfigSection {
+    token: String,
+    application_id: u64,
+    default_mode: Option<String>,
+    proactive_min: Option<i64>,
+    proactive_max: Option<i64>,
+    dm_mode: Option<String>,
+    unauth_message: Option<UnauthMessageConfig>,
 }
 
-impl ExtensionDef for ExampleExtension {
-    type Config = ExampleConfig;
-
-    fn extension_name() -> &'static str {
-        "example"
-    }
-
-    fn extension_description() -> Option<&'static str> {
-        Some("An example extension demonstrating the tool system")
-    }
-
-    fn create(config: Self::Config) -> Self {
-        Self::new(config)
-    }
+#[derive(Debug, Clone, Deserialize)]
+struct UnauthMessageConfig {
+    title: String,
+    description: String,
+    color: Option<i32>,
 }
 
-#[async_trait]
-impl Extension for ExampleExtension {
-    fn name(&self) -> &'static str {
-        "example"
-    }
+impl From<DiscordConfigSection> for DiscordExtensionConfig {
+    fn from(config: DiscordConfigSection) -> Self {
+        let default_mode = match config.default_mode.as_deref() {
+            Some("disabled") => ChannelMode::Disabled,
+            Some("evaluate_all") => ChannelMode::EvaluateAll,
+            Some("thread") => ChannelMode::Thread,
+            Some("active") => ChannelMode::Active,
+            _ => ChannelMode::Thread,
+        };
 
-    fn description(&self) -> Option<&'static str> {
-        Some("An example extension demonstrating the tool system")
-    }
+        let dm_mode = match config.dm_mode.as_deref() {
+            Some("reactive") => DmMode::Reactive,
+            Some("proactive") => DmMode::Proactive,
+            _ => DmMode::Reactive,
+        };
 
-    fn register_tools(&self, registry: &mut nysa_core::ToolRegistry) {
-        if !self.config.enabled {
-            return;
+        let unauth_message = config
+            .unauth_message
+            .map(|m| UnauthMessage {
+                title: m.title,
+                description: m.description,
+                color: m.color.unwrap_or(0xFF6B6B),
+            })
+            .unwrap_or(UnauthMessage {
+                title: "Authentication Required".to_string(),
+                description: "Please authenticate with Nysa using `/auth` to start chatting."
+                    .to_string(),
+                color: 0xFF6B6B,
+            });
+
+        DiscordExtensionConfig {
+            token: config.token,
+            application_id: config.application_id,
+            default_mode,
+            proactive_min: config.proactive_min.unwrap_or(60),
+            proactive_max: config.proactive_max.unwrap_or(240),
+            dm_mode,
+            unauth_message,
         }
-
-        let echo_tool = ToolDefinition::builder()
-            .name(&format!("{}_echo", self.config.prefix.to_lowercase()))
-            .description("Echo back the provided message")
-            .parameters(
-                SchemaBuilder::object()
-                    .property(
-                        "message",
-                        PropertyType::string().description("The message to echo back"),
-                    )
-                    .required("message")
-                    .build(),
-            )
-            .category("utility")
-            .build()
-            .expect("Failed to build echo tool definition");
-
-        registry.register(echo_tool, EchoHandler);
-    }
-
-    async fn on_start(&self) -> Result<(), ExtensionError> {
-        Ok(())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let db_url = "postgres://nysa:test-password@localhost:5432/nysa";
-    let db = Database::connect(db_url).await?;
+    let args = Args::parse();
 
-    // Method 1: Direct instantiation
-    let config = ExampleConfig {
-        prefix: "example".to_string(),
-        enabled: true,
-    };
+    let config_content = std::fs::read_to_string(&args.config).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to read config file {}: {}",
+            args.config.display(),
+            e
+        )
+    })?;
+
+    let config: Config = toml::from_str(&config_content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse config file: {}", e))?;
+
+    // Note: Logging is initialized by nysa-core App::init_logging()
+
+    tracing::info!("Connecting to database...");
+    let db = Database::connect(&config.database.url)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
+
+    let discord_config: DiscordExtensionConfig = config.discord.into();
+
+    tracing::info!("Starting Nysa...");
+
+    // Clone the database connection for DiscordExtension
+    let db_clone = db.clone();
+
     let app = App::builder(db)
-        .extension(ExampleExtension::new(config))
+        .extension(DiscordExtension::new(discord_config, db_clone))
         .build()
         .await?;
 
-    println!("Registered tools:");
+    tracing::info!("Registered tools:");
     {
         let registry = app.tool_registry();
         let registry = registry.read().await;
         for tool in registry.all() {
-            println!("{} ({}) - {}", tool.name, tool.category, tool.description);
+            tracing::info!("  {} ({}) - {}", tool.name, tool.category, tool.description);
         }
     }
+
+    tracing::info!("Nysa is running. Press Ctrl+C to shut down.");
+
+    tokio::signal::ctrl_c().await?;
+
+    tracing::info!("Shutting down...");
+    app.shutdown().await?;
 
     Ok(())
 }
