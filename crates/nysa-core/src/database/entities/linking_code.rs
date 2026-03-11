@@ -1,14 +1,16 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-#[sea_orm(table_name = "users")]
+#[sea_orm(table_name = "linking_codes")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub id: i32,
+    pub code_hash: String,
+    pub user_id: Uuid,
+    pub platform: String,
     pub created_at: DateTime,
-    pub linked_profiles: Json,
-    pub preferences: Json,
-    pub token_hash: String,
+    pub expires_at: DateTime,
+    pub used_at: Option<DateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -1,14 +1,16 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-#[sea_orm(table_name = "users")]
+#[sea_orm(table_name = "guild_configs")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: Uuid,
+    pub guild_id: i64,
+    pub default_mode: String,
+    pub proactive_range: Json,
+    pub dm_mode: String,
+    pub config: Json,
     pub created_at: DateTime,
-    pub linked_profiles: Json,
-    pub preferences: Json,
-    pub token_hash: String,
+    pub updated_at: DateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
