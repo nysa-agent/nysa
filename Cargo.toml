@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/nysa-core",
     "crates/nysa-sh",
+    "crates/nysa-discord",
 ]
 
 [workspace.dependencies]
@@ -24,3 +25,11 @@ futures = "0.3"
 thiserror = "2.0"
 parking_lot = "0.12"
 uuid = { version = "1.0", features = ["v4", "serde"] }
+sha2 = "0.10"
+base58 = "0.2"
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "http", "rustls_backend"] }
+poise = "0.6"
+once_cell = "1.19"
+clap = { version = "4", features = ["derive"] }
