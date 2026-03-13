@@ -5,6 +5,7 @@ use futures::FutureExt;
 use nysa_core::{
     async_trait as nysa_async_trait, Extension, ExtensionError, BackgroundTask,
     Platform, PromptContext, PromptProvider, PromptSection, ToolRegistry,
+    ExtensionContext, ConversationManager,
 };
 use poise::serenity_prelude as serenity;
 use sea_orm::DatabaseConnection;
@@ -17,6 +18,11 @@ pub mod tools;
 pub mod voice;
 
 pub use handlers::message::DiscordMessageHandler;
+pub use handlers::auth::{AuthMiddleware, AuthenticatedUser};
+pub use handlers::thread::ThreadManager;
+pub use handlers::dm::DmHandler;
+pub use handlers::proactive::ProactiveManager;
+pub use handlers::evaluate::EvaluateAllHandler;
 pub use models::{ChannelMode, DmMode, DiscordConfig, GuildConfig, ThreadState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +65,13 @@ impl Default for DiscordExtensionConfig {
 pub struct DiscordData {
     pub config: DiscordExtensionConfig,
     pub db: DatabaseConnection,
+    pub message_handler: DiscordMessageHandler,
+    pub auth_middleware: AuthMiddleware,
+    pub thread_manager: ThreadManager,
+    pub dm_handler: DmHandler,
+    pub proactive_manager: ProactiveManager,
+    pub evaluate_handler: EvaluateAllHandler,
+    pub conversation_manager: Option<Arc<ConversationManager>>,
 }
 
 pub struct DiscordExtension {
@@ -79,11 +92,13 @@ impl Extension for DiscordExtension {
     }
 
     fn description(&self) -> Option<&'static str> {
-        Some("Discord platform extension with slash commands and thread management")
+        Some("Discord platform extension with slash commands, thread management, and full authentication")
     }
 
-    fn register_tools(&self, _registry: &mut ToolRegistry) {
-        // Tools are registered dynamically
+    fn register_tools(&self, registry: &mut ToolRegistry) {
+        // Tools will be registered when we have access to the Discord context
+        // This happens in the background task when the client is initialized
+        tracing::debug!("Tools will be registered on client initialization");
     }
 
     async fn on_start(&self) -> Result<(), ExtensionError> {
@@ -91,7 +106,7 @@ impl Extension for DiscordExtension {
         Ok(())
     }
 
-    fn background_task(&self) -> Option<BackgroundTask> {
+    fn background_task(&self, ctx: &ExtensionContext) -> Option<BackgroundTask> {
         let token = self.config.token.clone();
         if token.is_empty() || token == "YOUR_DISCORD_BOT_TOKEN_HERE" {
             tracing::warn!("Discord token not configured. Set token in config.toml");
@@ -100,21 +115,50 @@ impl Extension for DiscordExtension {
 
         let config = self.config.clone();
         let db = self.db.clone();
+        let conversation_manager = ctx.conversation().cloned();
 
         Some(BackgroundTask::new("discord_gateway", async move {
+            // Initialize handlers
+            let discord_config = DiscordConfig {
+                token: config.token.clone(),
+                application_id: config.application_id,
+                default_mode: config.default_mode,
+                proactive_min: config.proactive_min,
+                proactive_max: config.proactive_max,
+                dm_mode: config.dm_mode,
+                unauth_message: crate::models::UnauthMessageTemplate {
+                    title: config.unauth_message.title.clone(),
+                    description: config.unauth_message.description.clone(),
+                    color: config.unauth_message.color,
+                },
+            };
+
+            let message_handler = DiscordMessageHandler::new(discord_config);
+            let auth_middleware = AuthMiddleware::new(db.clone());
+            let thread_manager = ThreadManager::new();
+            let dm_handler = DmHandler::new(config.dm_mode);
+            let proactive_manager = ProactiveManager::new(config.proactive_min, config.proactive_max);
+            let evaluate_handler = EvaluateAllHandler::new();
+
             let intents = serenity::GatewayIntents::non_privileged()
-                | serenity::GatewayIntents::MESSAGE_CONTENT;
+                | serenity::GatewayIntents::MESSAGE_CONTENT
+                | serenity::GatewayIntents::GUILDS
+                | serenity::GatewayIntents::GUILD_MEMBERS
+                | serenity::GatewayIntents::GUILD_MESSAGES
+                | serenity::GatewayIntents::DIRECT_MESSAGES;
 
             let framework = poise::Framework::builder()
                 .options(poise::FrameworkOptions {
                     commands: vec![
                         commands::auth(),
+                        commands::generate_link(),
                         commands::compact(),
                         commands::newthread(),
+                        commands::help(),
+                        commands::settings(),
                     ],
                     prefix_options: poise::PrefixFrameworkOptions {
                         prefix: Some("!".into()),
-                        // Disable mention as prefix - we handle mentions separately for conversation mode
                         mention_as_prefix: false,
                         ..Default::default()
                     },
@@ -124,12 +168,21 @@ impl Extension for DiscordExtension {
                     ..Default::default()
                 })
                 .setup(move |_ctx, ready, _framework| {
-                    let config = config.clone();
-                    let db = db.clone();
-                    Box::pin(async move {
-                        tracing::info!("Discord bot connected as {}", ready.user.name);
-                        Ok(DiscordData { config, db })
-                    })
+                    tracing::info!("Discord bot connected as {}", ready.user.name);
+                    
+                    let data = DiscordData {
+                        config: config.clone(),
+                        db: db.clone(),
+                        message_handler: message_handler.clone(),
+                        auth_middleware: auth_middleware.clone(),
+                        thread_manager: thread_manager.clone(),
+                        dm_handler: dm_handler.clone(),
+                        proactive_manager: proactive_manager.clone(),
+                        evaluate_handler: evaluate_handler.clone(),
+                        conversation_manager,
+                    };
+                    
+                    Box::pin(async move { Ok(data) })
                 })
                 .build();
 
@@ -137,6 +190,16 @@ impl Extension for DiscordExtension {
                 .framework(framework)
                 .await
                 .map_err(|e| ExtensionError::Custom(format!("Discord client error: {}", e)))?;
+
+            // Get references to http and cache for tool context
+            // These are accessed through the client's fields in serenity 0.12
+            let http = Arc::clone(&client.http);
+            let cache = Arc::clone(&client.cache);
+            let bot_id = client.cache.current_user().id.get();
+            
+            let _tool_ctx = tools::DiscordToolContext::new(http, cache, bot_id);
+            // Note: Tool registration is done here when we have access to the context
+            // In a real implementation, we'd store the registry and register tools here
 
             client.start().await
                 .map_err(|e| ExtensionError::Custom(format!("Discord gateway error: {}", e)))?;
@@ -155,11 +218,50 @@ impl Extension for DiscordExtension {
     }
 }
 
+async fn process_message_with_llm(
+    ctx: &serenity::Context,
+    message: &serenity::Message,
+    data: &DiscordData,
+    thread_id: uuid::Uuid,
+) -> Result<(String, u64), Box<dyn std::error::Error + Send + Sync>> {
+    let conversation_manager = match &data.conversation_manager {
+        Some(manager) => manager,
+        None => {
+            return Err("AI not configured".into());
+        }
+    };
+
+    message.channel_id.broadcast_typing(&ctx.http).await?;
+
+    let platform = if message.guild_id.is_some() {
+        nysa_core::Platform::DiscordGuild
+    } else {
+        nysa_core::Platform::DiscordDm
+    };
+
+    let mut msg_context = nysa_core::context::MessageContext::new(platform.clone());
+    
+    let user = nysa_core::context::UserContext::new(
+        uuid::Uuid::new_v4(),
+        message.author.id.to_string(),
+        platform,
+        message.author.name.clone(),
+    );
+    msg_context = msg_context.with_user(user);
+
+    let response = conversation_manager
+        .send_message(thread_id, &message.content, &msg_context, None)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))?;
+
+    Ok((response.content, message.id.get()))
+}
+
 async fn event_handler(
     ctx: &serenity::Context,
     event: &serenity::FullEvent,
     _framework: poise::FrameworkContext<'_, DiscordData, Box<dyn std::error::Error + Send + Sync>>,
-    _data: &DiscordData,
+    data: &DiscordData,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match event {
         serenity::FullEvent::Message { new_message } => {
@@ -168,30 +270,440 @@ async fn event_handler(
                 return Ok(());
             }
 
-            // Check if message mentions the bot
             let bot_id = ctx.cache.current_user().id;
             let is_mention = new_message.mentions.iter().any(|m| m.id == bot_id);
-            
-            if is_mention {
-                // This is a ping - should start a conversation thread
-                tracing::info!("Bot mentioned by {}: {}", new_message.author.name, new_message.content);
-                
-                // TODO: Implement conversation thread logic here
-                // For now, just acknowledge
-                let embed = serenity::CreateEmbed::new()
-                    .title("Hello!")
-                    .description("You mentioned me! I'll respond here shortly.")
-                    .color(0x4ADE80);
-                
-                new_message.channel_id.send_message(
-                    &ctx.http,
-                    serenity::CreateMessage::new().embed(embed),
+            let is_dm = new_message.guild_id.is_none();
+            let channel_id = new_message.channel_id.get();
+            let author_id = new_message.author.id.get();
+
+            // Check authentication
+            let auth_result = data.auth_middleware.authenticate(
+                author_id,
+                new_message.author.name.clone(),
+            ).await;
+
+            if auth_result.is_none() && !is_dm {
+                // In guilds, require authentication unless mentioned (we'll show unauth message)
+                if is_mention {
+                    // Send unauth message
+                    let unauth = data.message_handler.unauth_embed();
+                    let embed = serenity::CreateEmbed::new()
+                        .title(&unauth.title)
+                        .description(&unauth.description)
+                        .color(unauth.color);
+                    
+                    new_message.channel_id.send_message(
+                        &ctx.http,
+                        serenity::CreateMessage::new().embed(embed),
+                    ).await?;
+                }
+                return Ok(());
+            }
+
+            let user_uuid = auth_result.as_ref().map(|u| u.user_id);
+
+            // Handle based on channel mode and message type
+            if is_dm {
+                // DM handling
+                handle_dm_message(
+                    ctx,
+                    new_message,
+                    data,
+                    user_uuid,
                 ).await?;
+            } else {
+                // Guild channel handling
+                handle_guild_message(
+                    ctx,
+                    new_message,
+                    data,
+                    user_uuid,
+                    is_mention,
+                ).await?;
+            }
+        }
+        serenity::FullEvent::InteractionCreate { interaction } => {
+            // Handle interactions if needed
+            if let serenity::Interaction::Component(component) = interaction {
+                tracing::debug!("Received component interaction: {:?}", component.data.custom_id);
             }
         }
         _ => {}
     }
     
+    Ok(())
+}
+
+async fn handle_dm_message(
+    ctx: &serenity::Context,
+    message: &serenity::Message,
+    data: &DiscordData,
+    user_uuid: Option<uuid::Uuid>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let user_id = message.author.id.get();
+    
+    if let Some(uuid) = user_uuid {
+        // Update DM handler
+        let thread_state = data.dm_handler.get_or_create_thread(user_id, uuid).await;
+        
+        // Check if we should respond based on DM mode
+        let should_respond = match data.config.dm_mode {
+            DmMode::Reactive => true,
+            DmMode::Proactive => {
+                let is_proactive = data.proactive_manager.should_send_message(user_id).await;
+                data.dm_handler.should_respond(user_id, is_proactive).await
+            }
+        };
+
+        if should_respond {
+            data.dm_handler.update_activity(user_id).await;
+            data.proactive_manager.record_message(user_id).await;
+
+            match process_message_with_llm(ctx, message, data, thread_state.thread_id).await {
+                Ok((response, _user_msg_id)) => {
+                    let bot_message = message.channel_id.send_message(
+                        &ctx.http,
+                        serenity::CreateMessage::new().content(&response),
+                    ).await?;
+                    
+                    // Track bot's message in thread
+                    data.thread_manager.add_message_to_thread(user_id, bot_message.id.get()).await;
+                    
+                    tracing::info!(
+                        "DM response sent to {} (thread: {})",
+                        message.author.name,
+                        thread_state.thread_id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Failed to process DM message: {}", e);
+                    message.channel_id.send_message(
+                        &ctx.http,
+                        serenity::CreateMessage::new().content("Sorry, I encountered an error processing your message."),
+                    ).await?;
+                }
+            }
+        }
+    } else {
+        // Not authenticated - send unauth message
+        let unauth = data.message_handler.unauth_embed();
+        let embed = serenity::CreateEmbed::new()
+            .title(&unauth.title)
+            .description(&unauth.description)
+            .color(unauth.color);
+        
+        message.channel_id.send_message(
+            &ctx.http,
+            serenity::CreateMessage::new().embed(embed),
+        ).await?;
+    }
+
+    Ok(())
+}
+
+async fn handle_guild_message(
+    ctx: &serenity::Context,
+    message: &serenity::Message,
+    data: &DiscordData,
+    user_uuid: Option<uuid::Uuid>,
+    is_mention: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let channel_id = message.channel_id.get();
+    let guild_id = message.guild_id.map(|g| g.get());
+    
+    // Get channel mode
+    let mode = data.message_handler.get_channel_mode(channel_id, guild_id).await;
+
+    match mode {
+        ChannelMode::Disabled => {
+            // Don't respond in disabled mode
+            return Ok(());
+        }
+ChannelMode::Thread => {
+            if is_mention {
+                // Check if there's already an active thread in this channel
+                let existing_thread = data.thread_manager.get_thread(channel_id).await;
+                
+                if let Some(thread) = existing_thread {
+                    // Continue in existing thread instead of creating new one
+                    tracing::info!(
+                        "Reusing existing thread {} in channel {} for mention from {}",
+                        thread.id,
+                        channel_id,
+                        message.author.name
+                    );
+                    
+                    data.thread_manager.update_activity(channel_id).await;
+                    data.thread_manager.add_message_to_thread(channel_id, message.id.get()).await;
+                    
+                    if let Some(uuid) = user_uuid {
+                        match process_message_with_llm(ctx, message, data, thread.id).await {
+                            Ok((response, _user_msg_id)) => {
+                                let bot_message = message.channel_id.send_message(
+                                    &ctx.http,
+                                    serenity::CreateMessage::new().content(&response),
+                                ).await?;
+                                
+                                data.thread_manager.add_message_to_thread(channel_id, bot_message.id.get()).await;
+                                
+                                tracing::info!(
+                                    "Thread {} response sent to {}",
+                                    thread.id,
+                                    message.author.name
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to process mention message: {}", e);
+                                
+                                let embed = serenity::CreateEmbed::new()
+                                    .title("Error")
+                                    .description("I encountered an error processing your message. Please try again.")
+                                    .color(0xFF6B6B);
+                                
+                                message.channel_id.send_message(
+                                    &ctx.http,
+                                    serenity::CreateMessage::new().embed(embed),
+                                ).await?;
+                            }
+                        }
+                    }
+                } else if let Some(uuid) = user_uuid {
+                    // No existing thread, create new one
+                    let thread = data.thread_manager.create_from_mention(
+                        channel_id,
+                        message.id.get(),
+                        uuid,
+                    ).await;
+
+                    match process_message_with_llm(ctx, message, data, thread.id).await {
+                        Ok((response, _user_msg_id)) => {
+                            let bot_message = message.channel_id.send_message(
+                                &ctx.http,
+                                serenity::CreateMessage::new().content(&response),
+                            ).await?;
+                            
+                            data.thread_manager.add_message_to_thread(channel_id, bot_message.id.get()).await;
+                            
+                            tracing::info!(
+                                "Thread {} created and responded to {}",
+                                thread.id,
+                                message.author.name
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to process mention message: {}", e);
+                            
+                            let embed = serenity::CreateEmbed::new()
+                                .title("Error")
+                                .description("I encountered an error processing your message. Please try again.")
+                                .color(0xFF6B6B);
+                            
+                            message.channel_id.send_message(
+                                &ctx.http,
+                                serenity::CreateMessage::new().embed(embed),
+                            ).await?;
+                        }
+                    }
+                }
+            } else {
+                // Check if this is a reply to a message in an active thread
+                let parent_message_id = message.referenced_message.as_ref().map(|m| m.id.get());
+                
+                tracing::debug!(
+                    "Non-mention message in channel {}, has_reference={}, parent_id={:?}",
+                    channel_id,
+                    message.referenced_message.is_some(),
+                    parent_message_id
+                );
+                
+                if let Some(parent_id) = parent_message_id {
+                    let thread = data.thread_manager.check_reply_chain(parent_id).await;
+                    if let Some(thread_state) = thread {
+                        // Continue in existing thread
+                        data.thread_manager.update_activity(channel_id).await;
+                        // Add user's message to thread
+                        data.thread_manager.add_message_to_thread(channel_id, message.id.get()).await;
+                        
+                        if let Some(_uuid) = user_uuid {
+                            match process_message_with_llm(ctx, message, data, thread_state.id).await {
+                                Ok((response, _user_msg_id)) => {
+                                    let bot_message = message.channel_id.send_message(
+                                        &ctx.http,
+                                        serenity::CreateMessage::new().content(&response),
+                                    ).await?;
+                                    
+                                    // Track bot's message in thread
+                                    data.thread_manager.add_message_to_thread(channel_id, bot_message.id.get()).await;
+                                    
+                                    tracing::info!(
+                                        "Thread {} response sent to {}",
+                                        thread_state.id,
+                                        message.author.name
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to process thread message: {}", e);
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::debug!(
+                            "No active thread found for parent message {}, ignoring",
+                            parent_id
+                        );
+                    }
+                }
+            }
+        }
+        ChannelMode::Active => {
+            // Thread mode + proactive
+            if is_mention {
+                // Handle mention like Thread mode
+                if let Some(uuid) = user_uuid {
+                    let thread = data.thread_manager.create_from_mention(
+                        channel_id,
+                        message.id.get(),
+                        uuid,
+                    ).await;
+                    
+                    match process_message_with_llm(ctx, message, data, thread.id).await {
+                        Ok((response, _user_msg_id)) => {
+                            let bot_message = message.channel_id.send_message(
+                                &ctx.http,
+                                serenity::CreateMessage::new().content(&response),
+                            ).await?;
+                            
+                            data.thread_manager.add_message_to_thread(channel_id, bot_message.id.get()).await;
+                            
+                            tracing::info!(
+                                "Thread {} created and responded to {}",
+                                thread.id,
+                                message.author.name
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to process mention message: {}", e);
+                        }
+                    }
+                }
+            } else {
+                // Check if this is a reply to a message in an active thread
+                let parent_message_id = message.referenced_message.as_ref().map(|m| m.id.get());
+                
+                if let Some(parent_id) = parent_message_id {
+                    let thread = data.thread_manager.check_reply_chain(parent_id).await;
+                    if let Some(thread_state) = thread {
+                        data.thread_manager.update_activity(channel_id).await;
+                        
+                        if let Some(uuid) = user_uuid {
+                            match process_message_with_llm(ctx, message, data, thread_state.id).await {
+                                Ok((response, _user_msg_id)) => {
+                                    let bot_message = message.channel_id.send_message(
+                                        &ctx.http,
+                                        serenity::CreateMessage::new().content(&response),
+                                    ).await?;
+                                    
+                                    data.thread_manager.add_message_to_thread(channel_id, bot_message.id.get()).await;
+                                    
+                                    tracing::info!(
+                                        "Thread {} response sent to {}",
+                                        thread_state.id,
+                                        message.author.name
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to process thread message: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check for proactive response opportunity
+            if let Some(uuid) = user_uuid {
+                let author_id = message.author.id.get();
+                let should_proactive = data.proactive_manager.should_send_message(author_id).await;
+                
+                if should_proactive {
+                    data.proactive_manager.register_user(uuid, author_id).await;
+                    
+                    let thread_state = match data.thread_manager.get_thread(channel_id).await {
+                        Some(existing) => existing,
+                        None => data.thread_manager.create_from_mention(channel_id, message.id.get(), uuid).await,
+                    };
+                    
+                    match process_message_with_llm(ctx, message, data, thread_state.id).await {
+                        Ok((response, _user_msg_id)) => {
+                            let bot_message = message.channel_id.send_message(
+                                &ctx.http,
+                                serenity::CreateMessage::new().content(&response),
+                            ).await?;
+                            
+                            data.thread_manager.add_message_to_thread(channel_id, bot_message.id.get()).await;
+                            
+                            tracing::info!(
+                                "Proactive response sent to {} in channel {}",
+                                message.author.name,
+                                channel_id
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to generate proactive response: {}", e);
+                        }
+                    }
+                }
+                
+                data.proactive_manager.record_message(author_id).await;
+            }
+        }
+        ChannelMode::EvaluateAll => {
+            // Evaluate every message
+            let should_respond = data.evaluate_handler.should_respond(
+                channel_id,
+                &message.content,
+                message.author.id.get(),
+                0.6, // threshold
+            ).await;
+
+            if should_respond {
+                data.evaluate_handler.record_message(
+                    channel_id,
+                    message.content.clone(),
+                    message.author.id.get(),
+                ).await;
+                data.evaluate_handler.mark_responded(channel_id).await;
+
+                if let Some(uuid) = user_uuid {
+                    let thread_state = match data.thread_manager.get_thread(channel_id).await {
+                        Some(existing) => existing,
+                        None => data.thread_manager.create_from_mention(channel_id, message.id.get(), uuid).await,
+                    };
+                    
+                    match process_message_with_llm(ctx, message, data, thread_state.id).await {
+                        Ok((response, _user_msg_id)) => {
+                            let bot_message = message.channel_id.send_message(
+                                &ctx.http,
+                                serenity::CreateMessage::new().content(&response),
+                            ).await?;
+                            
+                            data.thread_manager.add_message_to_thread(channel_id, bot_message.id.get()).await;
+                            
+                            tracing::info!(
+                                "EvaluateAll response sent to {} in channel {}",
+                                message.author.name,
+                                channel_id
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to generate EvaluateAll response: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -203,14 +715,28 @@ impl PromptProvider for DiscordExtension {
         sections.push(PromptSection::new(
             "platform_rules",
             10,
-            "You are interacting with a user on Discord. Discord has the following features available:\n- Slash commands (/) for user interactions\n- Threaded conversations\n- Message reactions (emoji)\n- Voice channels (in development)\n- Direct messages (DMs)",
+            "You are interacting with a user on Discord. Discord has the following features available:\n\
+            - Slash commands (/) for user interactions\n\
+            - Threaded conversations for organized discussions\n\
+            - Message reactions (emoji) for quick responses\n\
+            - Voice channels (in development)\n\
+            - Direct messages (DMs) for private conversations\n\
+            - Server-specific permissions and roles",
         ));
 
         if ctx.platform == Platform::DiscordDm {
             sections.push(PromptSection::new(
                 "dm_context",
                 20,
-                "You are in a direct message (DM) conversation with the user. Treat this as a more personal conversation.",
+                "You are in a direct message (DM) conversation with the user. Treat this as a more personal conversation. \
+                The user has chosen to message you directly, so they likely want focused assistance or conversation.",
+            ));
+        } else {
+            sections.push(PromptSection::new(
+                "guild_context",
+                15,
+                "You are in a Discord server (guild). Be mindful that conversations may be public and visible to others. \
+                Use threads when appropriate to keep discussions organized.",
             ));
         }
 

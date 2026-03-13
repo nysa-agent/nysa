@@ -119,6 +119,8 @@ pub struct ThreadState {
     pub user_id: Uuid,
     pub last_message_at: chrono::DateTime<chrono::Utc>,
     pub is_active: bool,
+    /// Track all message IDs in this thread for reply detection
+    pub message_ids: Vec<u64>,
 }
 
 impl ThreadState {
@@ -130,7 +132,24 @@ impl ThreadState {
             user_id,
             last_message_at: chrono::Utc::now(),
             is_active: true,
+            message_ids: Vec::new(),
         }
+    }
+
+    /// Add a message ID to the thread's history
+    pub fn add_message(&mut self, message_id: u64) {
+        if !self.message_ids.contains(&message_id) {
+            self.message_ids.push(message_id);
+            // Keep only last 100 message IDs to prevent unbounded growth
+            if self.message_ids.len() > 100 {
+                self.message_ids.remove(0);
+            }
+        }
+    }
+
+    /// Check if a message ID is part of this thread
+    pub fn contains_message(&self, message_id: u64) -> bool {
+        self.message_ids.contains(&message_id)
     }
 }
 
