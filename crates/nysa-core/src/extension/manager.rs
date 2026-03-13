@@ -78,7 +78,7 @@ impl ExtensionManager {
         }
     }
 
-    pub async fn start_all(&mut self, _ctx: &ExtensionContext) -> Result<(), ExtensionError> {
+    pub async fn start_all(&mut self, ctx: &ExtensionContext) -> Result<(), ExtensionError> {
         if self.extensions.is_empty() {
             info!("No extensions to start");
             return Ok(());
@@ -110,7 +110,7 @@ impl ExtensionManager {
                 }
             }
 
-            if let Some(task) = extension.background_task() {
+            if let Some(task) = extension.background_task(ctx) {
                 let token = self.cancellation_token.clone();
                 let ext_name = name.to_string();
                 let task_name = task.name;

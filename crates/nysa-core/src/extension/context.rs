@@ -10,6 +10,7 @@ use crate::auth::AuthService;
 use crate::compaction::CompactionManager;
 use crate::config::Config;
 use crate::extension::event::{EventBus, SharedEventBus};
+use crate::llm::ConversationManager;
 use crate::tool::ToolRegistry;
 
 pub struct ExtensionContext {
@@ -20,6 +21,7 @@ pub struct ExtensionContext {
     pub cancellation_token: CancellationToken,
     auth_service: Option<Arc<AuthService>>,
     compaction_manager: Option<Arc<CompactionManager>>,
+    conversation_manager: Option<Arc<ConversationManager>>,
     state: parking_lot::RwLock<HashMap<TypeId, Arc<dyn std::any::Any + Send + Sync>>>,
 }
 
@@ -37,6 +39,7 @@ impl ExtensionContext {
             cancellation_token,
             auth_service: None,
             compaction_manager: None,
+            conversation_manager: None,
             state: parking_lot::RwLock::new(HashMap::new()),
         }
     }
@@ -50,6 +53,11 @@ impl ExtensionContext {
         self.compaction_manager = Some(Arc::new(manager));
         self
     }
+
+    pub fn with_conversation_manager(mut self, manager: Arc<ConversationManager>) -> Self {
+        self.conversation_manager = Some(manager);
+        self
+    }
     
     pub fn auth(&self) -> Option<&Arc<AuthService>> {
         self.auth_service.as_ref()
@@ -57,6 +65,10 @@ impl ExtensionContext {
 
     pub fn compaction(&self) -> Option<&Arc<CompactionManager>> {
         self.compaction_manager.as_ref()
+    }
+
+    pub fn conversation(&self) -> Option<&Arc<ConversationManager>> {
+        self.conversation_manager.as_ref()
     }
     
     pub fn store<T: 'static + Send + Sync>(&self, value: T) {
@@ -100,6 +112,7 @@ impl Clone for ExtensionContext {
             cancellation_token: self.cancellation_token.clone(),
             auth_service: self.auth_service.clone(),
             compaction_manager: self.compaction_manager.clone(),
+            conversation_manager: self.conversation_manager.clone(),
             state: parking_lot::RwLock::new(HashMap::new()),
         }
     }

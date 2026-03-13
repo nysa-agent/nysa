@@ -79,7 +79,7 @@ pub trait Extension: Send + Sync + 'static {
         Ok(())
     }
     
-    fn background_task(&self) -> Option<BackgroundTask> {
+    fn background_task(&self, _ctx: &crate::extension::context::ExtensionContext) -> Option<BackgroundTask> {
         None
     }
     

@@ -14,7 +14,8 @@ use crate::auth::AuthService;
 use crate::compaction::CompactionManager;
 use crate::config::{AiConfig, Config};
 use crate::extension::{EventBus, Extension, ExtensionContext, ExtensionManager};
-use crate::tool::{ToolDefinition, ToolHandler, ToolRegistry};
+use crate::llm::{ConversationManager, LlmClient, LlmConfig, MessageHistoryService};
+use crate::tool::{ToolDefinition, ToolHandler, ToolExecutor, ToolRegistry};
 
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -23,7 +24,9 @@ pub struct App {
     pub config: Arc<Config>,
     extensions: ExtensionManager,
     tool_registry: Arc<RwLock<ToolRegistry>>,
+    tool_executor: Arc<ToolExecutor>,
     event_bus: Arc<EventBus>,
+    conversation_manager: Option<Arc<ConversationManager>>,
 }
 
 impl App {
@@ -38,7 +41,7 @@ impl App {
     fn init_logging() {
         tracing_subscriber::fmt()
             .event_format(LogFormatter)
-            .with_env_filter(EnvFilter::new("info,sqlx::query=warn"))
+            .with_env_filter(EnvFilter::new("info,sqlx::query=warn,nysa_discord=debug"))
             .init();
 
         info!("initialized logging");
@@ -72,8 +75,18 @@ impl App {
         self.tool_registry.clone()
     }
 
+    pub fn tool_executor(&self) -> Arc<ToolExecutor> {
+        self.tool_executor.clone()
+    }
+
     pub fn event_bus(&self) -> Arc<EventBus> {
         self.event_bus.clone()
+    }
+
+    /// Get the conversation manager for LLM interactions
+    /// Returns None if AI is not configured
+    pub fn conversation_manager(&self) -> Option<Arc<ConversationManager>> {
+        self.conversation_manager.clone()
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
@@ -142,11 +155,40 @@ impl AppBuilder {
         self.extensions.register_tools(&mut self.tool_registry).await;
 
         let tool_registry = Arc::new(RwLock::new(self.tool_registry));
+        let tool_executor = Arc::new(ToolExecutor::new(Arc::clone(&tool_registry)));
 
         let config = Arc::new(self.config);
         
         let auth_service = AuthService::new(self.database.clone());
         let compaction_manager = CompactionManager::new(self.database.clone());
+
+        // Build conversation manager if AI is configured
+        let conversation_manager = if let Some(ref ai_config) = config.ai {
+            info!("Building conversation manager with AI configuration");
+            
+            let llm_client = Arc::new(LlmClient::new(&ai_config.chat));
+            let history_service = Arc::new(MessageHistoryService::new(self.database.clone()));
+            let compaction_service = compaction_manager.service();
+            
+            let llm_config = LlmConfig {
+                max_context_tokens: 120_000,
+                compaction_threshold: 0.8,
+                max_tool_iterations: 10,
+                default_mode: crate::llm::ResponseMode::Batch,
+                system_prompt_override: None,
+            };
+            
+            Some(Arc::new(ConversationManager::new(
+                llm_client,
+                history_service,
+                Some(Arc::clone(&tool_executor)),
+                compaction_service,
+                llm_config,
+            )))
+        } else {
+            info!("No AI configuration found, conversation manager disabled");
+            None
+        };
 
         let ctx = ExtensionContext::new(
             self.database.clone(),
@@ -155,6 +197,12 @@ impl AppBuilder {
         )
         .with_auth_service(auth_service)
         .with_compaction_manager(compaction_manager);
+
+        let ctx = if let Some(ref manager) = conversation_manager {
+            ctx.with_conversation_manager(Arc::clone(manager))
+        } else {
+            ctx
+        };
 
         self.extensions.start_all(&ctx).await?;
 
@@ -165,7 +213,9 @@ impl AppBuilder {
             config,
             extensions: self.extensions,
             tool_registry,
+            tool_executor,
             event_bus,
+            conversation_manager,
         })
     }
 }
