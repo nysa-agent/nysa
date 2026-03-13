@@ -1,149 +1,80 @@
-use nysa_core::{ToolDefinition, ToolHandler, ToolResult, ToolError, PropertyType, SchemaBuilder, async_trait};
+use nysa_core::{ToolHandler, ToolResult, ToolError, async_trait};
 use poise::serenity_prelude as serenity;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use serde_json::Value;
+
+use super::DiscordToolContext;
 
 pub struct ChannelManagementTool {
-    serenity_client: Arc<RwLock<Option<serenity::Client>>>,
+    ctx: DiscordToolContext,
 }
 
 impl ChannelManagementTool {
-    pub fn new() -> Self {
-        Self {
-            serenity_client: Arc::new(RwLock::new(None)),
-        }
-    }
-
-    pub fn with_client(mut self, client: serenity::Client) -> Self {
-        self.serenity_client = Arc::new(RwLock::new(Some(client)));
-        self
-    }
-
-    pub async fn set_client(&self, client: serenity::Client) {
-        let mut lock = self.serenity_client.write().await;
-        *lock = Some(client);
+    pub fn new(ctx: DiscordToolContext) -> Self {
+        Self { ctx }
     }
 }
 
 #[async_trait]
 impl ToolHandler for ChannelManagementTool {
-    async fn execute(&self, args: serde_json::Value) -> Result<ToolResult, ToolError> {
-        let action = args.get("action")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArguments("action is required".to_string()))?;
-
+    async fn execute(&self, args: Value) -> Result<ToolResult, ToolError> {
         let channel_id = args.get("channel_id")
             .and_then(|v| v.as_str())
-            .and_then(|s| s.parse::<u64>().ok());
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| ToolError::InvalidArguments("channel_id is required".to_string()))?;
 
-        let lock = self.serenity_client.read().await;
-        let client = lock.as_ref().ok_or_else(|| {
-            ToolError::ExecutionFailed("Discord client not initialized".to_string())
-        })?;
+        let channel = serenity::ChannelId::new(channel_id);
 
-        let channel = serenity::ChannelId(channel_id.ok_or_else(|| 
-            ToolError::InvalidArguments("channel_id is required".to_string())
-        )?);
+        // Check if this is a thread creation request
+        if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
+            // Create thread from message
+            let message_id = args.get("message_id")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(serenity::MessageId::new)
+                .ok_or_else(|| ToolError::InvalidArguments("message_id is required for thread creation".to_string()))?;
 
-        match action {
-            "create_thread" => {
-                let name = args.get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("New Thread");
-                
-                let thread = channel.create_thread(serenity::CreateThread::new(name)
+            match channel.create_thread_from_message(
+                &self.ctx.http,
+                message_id,
+                serenity::CreateThread::new(name)
                     .kind(serenity::ChannelType::PublicThread)
                     .invitable(false),
-                    &client.http
-                ).await.map_err(|e| ToolError::ExecutionFailed(format!("Failed to create thread: {}", e)))?;
-
-                Ok(ToolResult::success(serde_json::json!({
-                    "thread_id": thread.id.get(),
-                    "name": name,
-                }).to_string()))
+            ).await {
+                Ok(thread) => Ok(ToolResult::success(format!(
+                    "Created thread '{}' with ID {}",
+                    name,
+                    thread.id.get()
+                ))),
+                Err(e) => Ok(ToolResult::error(format!("Failed to create thread: {}", e))),
             }
-            "edit_message" => {
-                let message_id = args.get("message_id")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .ok_or_else(|| ToolError::InvalidArguments("message_id is required".to_string()))?;
-                
-                let content = args.get("content")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidArguments("content is required".to_string()))?;
+        } else if let Some(content) = args.get("content").and_then(|v| v.as_str()) {
+            // Edit message
+            let message_id = args.get("message_id")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(serenity::MessageId::new)
+                .ok_or_else(|| ToolError::InvalidArguments("message_id is required for editing".to_string()))?;
 
-                channel.edit_message(&client.http, message_id, |m| m.content(content))
-                    .await.map_err(|e| ToolError::ExecutionFailed(format!("Failed to edit message: {}", e)))?;
-
-                Ok(ToolResult::success(format!("Edited message {}", message_id)))
+            match channel.edit_message(
+                &self.ctx.http,
+                message_id,
+                serenity::EditMessage::new().content(content),
+            ).await {
+                Ok(_) => Ok(ToolResult::success("Message edited successfully".to_string())),
+                Err(e) => Ok(ToolResult::error(format!("Failed to edit message: {}", e))),
             }
-            "pin_message" => {
-                let message_id = args.get("message_id")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .ok_or_else(|| ToolError::InvalidArguments("message_id is required".to_string()))?;
+        } else {
+            // Pin/Unpin operation
+            let message_id = args.get("message_id")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(serenity::MessageId::new)
+                .ok_or_else(|| ToolError::InvalidArguments("message_id is required".to_string()))?;
 
-                channel.pin(&client.http, message_id)
-                    .await.map_err(|e| ToolError::ExecutionFailed(format!("Failed to pin message: {}", e)))?;
-
-                Ok(ToolResult::success(format!("Pinned message {}", message_id)))
+            match channel.pin(&self.ctx.http, message_id).await {
+                Ok(_) => Ok(ToolResult::success("Message pinned successfully".to_string())),
+                Err(e) => Ok(ToolResult::error(format!("Failed to pin message: {}", e))),
             }
-            "unpin_message" => {
-                let message_id = args.get("message_id")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .ok_or_else(|| ToolError::InvalidArguments("message_id is required".to_string()))?;
-
-                channel.unpin(&client.http, message_id)
-                    .await.map_err(|e| ToolError::ExecutionFailed(format!("Failed to unpin message: {}", e)))?;
-
-                Ok(ToolResult::success(format!("Unpinned message {}", message_id)))
-            }
-            "get_channel_info" => {
-                let channel_info = channel.to_channel(&client.http).await
-                    .map_err(|e| ToolError::ExecutionFailed(format!("Failed to get channel: {}", e)))?;
-
-                let info = match channel_info {
-                    serenity::Channel::Guild(c) => serde_json::json!({
-                        "id": c.id.get(),
-                        "name": c.name,
-                        "topic": c.topic,
-                        "kind": format!("{:?}", c.kind),
-                        "position": c.position,
-                    }),
-                    serenity::Channel::Private(c) => serde_json::json!({
-                        "id": c.id.get(),
-                        "kind": "private",
-                    }),
-                    _ => serde_json::json!({"error": "Unknown channel type"}),
-                };
-
-                Ok(ToolResult::success(info.to_string()))
-            }
-            _ => Err(ToolError::InvalidArguments(format!("Unknown action: {}", action))),
         }
     }
-}
-
-pub fn register(registry: &mut nysa_core::ToolRegistry) {
-    let tool = ToolDefinition::builder()
-        .name("channel_management")
-        .description("Manage Discord channels and threads (create threads, edit/pin messages, get channel info)")
-        .parameters(
-            SchemaBuilder::object()
-                .property("action", PropertyType::string()
-                    .description("Action to perform: create_thread, edit_message, pin_message, unpin_message, get_channel_info")
-                    .enum_values(vec!["create_thread", "edit_message", "pin_message", "unpin_message", "get_channel_info"]))
-                .property("channel_id", PropertyType::string().description("The channel ID"))
-                .property("message_id", PropertyType::string().description("The message ID (for edit/pin/unpin)"))
-                .property("name", PropertyType::string().description("Name (for create_thread)"))
-                .property("content", PropertyType::string().description("Content (for edit_message)"))
-                .required("action")
-                .build(),
-        )
-        .category("discord")
-        .build()
-        .expect("Failed to build channel_management tool");
-
-    registry.register(tool, ChannelManagementTool::new());
 }
