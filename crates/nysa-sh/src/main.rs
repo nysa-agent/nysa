@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use nysa_core::App;
+use nysa_core::config::{AiConfigBuilder, ChatConfigBuilder, EmbeddingConfigBuilder};
 use nysa_discord::models::{ChannelMode, DmMode};
 use nysa_discord::{DiscordExtension, DiscordExtensionConfig, UnauthMessage};
 use sea_orm::Database;
@@ -20,6 +21,7 @@ struct Args {
 struct Config {
     database: DatabaseConfig,
     discord: DiscordConfigSection,
+    ai: Option<AiConfigSection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -43,6 +45,32 @@ struct UnauthMessageConfig {
     title: String,
     description: String,
     color: Option<i32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AiConfigSection {
+    chat: ChatConfigSection,
+    embedding: Option<EmbeddingConfigSection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ChatConfigSection {
+    base_url: String,
+    api_key: String,
+    model: String,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    max_completion_tokens: Option<u32>,
+    frequency_penalty: Option<f32>,
+    presence_penalty: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct EmbeddingConfigSection {
+    base_url: String,
+    api_key: String,
+    model: String,
+    dimensions: Option<u32>,
 }
 
 impl From<DiscordConfigSection> for DiscordExtensionConfig {
@@ -113,13 +141,58 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting Nysa...");
 
-    // Clone the database connection for DiscordExtension
     let db_clone = db.clone();
 
-    let app = App::builder(db)
-        .extension(DiscordExtension::new(discord_config, db_clone))
-        .build()
-        .await?;
+    let mut app_builder = App::builder(db).extension(DiscordExtension::new(discord_config, db_clone));
+
+    // Configure AI if provided
+    if let Some(ai_config) = config.ai {
+        tracing::info!("Configuring AI with model: {}", ai_config.chat.model);
+        
+        let mut chat_builder = ChatConfigBuilder::new()
+            .base_url(ai_config.chat.base_url)
+            .api_key(ai_config.chat.api_key)
+            .model(ai_config.chat.model);
+
+        if let Some(temp) = ai_config.chat.temperature {
+            chat_builder = chat_builder.temperature(temp);
+        }
+        if let Some(top_p) = ai_config.chat.top_p {
+            chat_builder = chat_builder.top_p(top_p);
+        }
+        if let Some(max_tokens) = ai_config.chat.max_completion_tokens {
+            chat_builder = chat_builder.max_completion_tokens(max_tokens);
+        }
+        if let Some(freq_pen) = ai_config.chat.frequency_penalty {
+            chat_builder = chat_builder.frequency_penalty(freq_pen);
+        }
+        if let Some(pres_pen) = ai_config.chat.presence_penalty {
+            chat_builder = chat_builder.presence_penalty(pres_pen);
+        }
+
+        let chat_config = chat_builder.build()?;
+
+        let mut ai_builder = AiConfigBuilder::new().chat(chat_config);
+
+        if let Some(embedding) = ai_config.embedding {
+            let mut embedding_builder = EmbeddingConfigBuilder::new()
+                .base_url(embedding.base_url)
+                .api_key(embedding.api_key)
+                .model(embedding.model);
+
+            if let Some(dims) = embedding.dimensions {
+                embedding_builder = embedding_builder.dimensions(dims);
+            }
+
+            ai_builder = ai_builder.embedding(embedding_builder.build()?);
+        }
+
+        app_builder = app_builder.ai(ai_builder.build()?);
+    } else {
+        tracing::warn!("No AI configuration found. LLM features will be disabled.");
+    }
+
+    let app = app_builder.build().await?;
 
     tracing::info!("Registered tools:");
     {
