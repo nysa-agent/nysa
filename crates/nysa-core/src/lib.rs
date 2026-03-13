@@ -5,6 +5,7 @@ pub mod config;
 pub mod context;
 pub mod database;
 pub mod extension;
+pub mod llm;
 pub mod prompt;
 pub mod tool;
 
@@ -13,6 +14,30 @@ pub use auth::{AuthService, AuthProvider, AuthError, PlatformProfile, generate_t
 pub use compaction::{CompactionService, CompactionManager, CompactionError, CompactionResult, SearchResult};
 pub use context::{Platform, PlatformDetails, UserContext, MessageContext, format_system_context};
 pub use config::{Config, ConfigBuilder};
+pub use llm::{
+    Author,
+    ConversationManager,
+    ConversationMessage,
+    ConversationResponse,
+    LlmClient,
+    LlmConfig,
+    LlmError,
+    LlmResponse,
+    MessageHistoryService,
+    MessageRole,
+    ResponseMode,
+    SystemPrompt,
+    ToolCallRecord,
+    ToolExecution,
+    create_assistant_message,
+    create_system_message,
+    create_tool_message,
+    create_user_message,
+    estimate_messages_tokens,
+    estimate_tokens,
+    is_approaching_limit,
+    calculate_remaining_tokens,
+};
 pub use prompt::{PromptSection, PromptContext, PromptProvider, PromptBuilder, PromptCondition};
 pub use extension::{
     BackgroundTask, BoxFuture, Event, EventBus, Extension, ExtensionConfig, ExtensionContext,

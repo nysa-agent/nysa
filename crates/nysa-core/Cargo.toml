@@ -24,4 +24,6 @@ uuid = { workspace = true }
 sha2 = { workspace = true }
 base58 = { workspace = true }
 chrono = { workspace = true }
+argon2 = { workspace = true }
+dashmap = { workspace = true }
 rand = { workspace = true }
