@@ -35,6 +35,9 @@
 
 ---
 
+> [!WARNING]
+> Nysa's codebase is currently being ported over here from the old codebase and being refactored/rewritten, thus a lot of the original (and advertised) functionality is missing for now.
+
 Nysa is an open-source, general-purpose AI agent framework written in
 Rust. It talks to you across platforms, remembers things the way a
 person would, joins your voice calls, plays games with you, and can be
