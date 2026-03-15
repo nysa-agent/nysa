@@ -84,6 +84,15 @@ That's it. See the
 [configuration reference](https://nysa.phrolova.moe/) for everything
 else.
 
+## Reference & Documentation
+
+> [!WARNING]
+> Documentation is work-in-progress and lot of the stuff is going to be missing until the release of 1.0.0.
+
+Usage and development documentation can be found
+[on the site](https://nysa.phrolova.moe/). Reference can be generated
+from the source code using `cargo doc`.
+
 ## Nysa Cloud
 
 Don't want to self-host? **Nysa Cloud** is coming soon. Same Nysa,
@@ -95,8 +104,13 @@ who'd rather not manage infrastructure.
 
 ## Contributing
 
-Contributions are welcome. You submit code under
-AGPL-v3, same as the rest of the project.
+External contributions are not accepted for now. Wait until the project
+gets to a mature state before contributing. If you have any ideas or
+feedback, please open an [Discussion](https://github.com/nysa-agent/nysa/discussions)
+instead of creating an issue.
+
+If you wish to contribute code anyways, do open an issue to request to
+become a contributor.
 
 ## License
 
