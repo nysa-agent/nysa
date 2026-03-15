@@ -1,12 +1,9 @@
 use poise::serenity_prelude as serenity;
 use sea_orm::DatabaseConnection;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use uuid::Uuid;
 
-use nysa_core::{AuthService, AuthError};
-use nysa_core::auth::LinkingCodeError;
 use crate::models::user::Entity as UserEntity;
+use nysa_core::auth::LinkingCodeError;
+use nysa_core::{AuthError, AuthService};
 use sea_orm::EntityTrait;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -47,12 +44,13 @@ pub async fn auth(
     // Check rate limit
     let rate_limit_key = format!("discord:{}", discord_id);
     let rate_limit_result = auth_service.check_rate_limit(&rate_limit_key);
-    
+
     if !rate_limit_result.allowed {
-        let retry_after = rate_limit_result.retry_after
+        let retry_after = rate_limit_result
+            .retry_after
             .map(|d| format!("{} seconds", d.as_secs()))
             .unwrap_or_else(|| "a while".to_string());
-        
+
         let embed = serenity::CreateEmbed::new()
             .title("Rate Limited")
             .description(format!(
@@ -75,7 +73,7 @@ pub async fn auth(
     if let Some(user) = existing_user {
         // User is already authenticated - show account info
         let profiles = auth_service.get_user_profiles(&user.id).await?;
-        
+
         let linked_platforms = profiles
             .as_object()
             .map(|obj| obj.keys().cloned().collect::<Vec<_>>().join(", "))
@@ -108,20 +106,25 @@ pub async fn auth(
                         "avatar": ctx.author().avatar_url(),
                     });
 
-                    match auth_service.link_platform(user_id, "discord", &discord_id.to_string(), metadata).await {
+                    match auth_service
+                        .link_platform(user_id, "discord", &discord_id.to_string(), metadata)
+                        .await
+                    {
                         Ok(()) => {
                             // Create session
                             let session_metadata = serde_json::json!({
                                 "guild_id": ctx.guild_id().map(|g| g.get()),
                                 "channel_id": ctx.channel_id().get(),
                             });
-                            
-                            let _session = auth_service.create_session(
-                                user_id,
-                                "discord",
-                                &format!("{}", discord_id),
-                                session_metadata,
-                            ).await;
+
+                            let _session = auth_service
+                                .create_session(
+                                    user_id,
+                                    "discord",
+                                    &format!("{}", discord_id),
+                                    session_metadata,
+                                )
+                                .await;
 
                             let embed = serenity::CreateEmbed::new()
                                 .title("Account Linked!")
@@ -167,7 +170,9 @@ pub async fn auth(
                     tracing::error!("Authentication error: {}", e);
                     let embed = serenity::CreateEmbed::new()
                         .title("Authentication Error")
-                        .description("An error occurred during authentication. Please try again later.")
+                        .description(
+                            "An error occurred during authentication. Please try again later.",
+                        )
                         .color(0xFF6B6B);
 
                     ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
@@ -182,20 +187,25 @@ pub async fn auth(
                 "avatar": ctx.author().avatar_url(),
             });
 
-            match auth_service.redeem_linking_code(input, "discord", &discord_id.to_string(), metadata).await {
+            match auth_service
+                .redeem_linking_code(input, "discord", &discord_id.to_string(), metadata)
+                .await
+            {
                 Ok(user_id) => {
                     // Create session
                     let session_metadata = serde_json::json!({
                         "guild_id": ctx.guild_id().map(|g| g.get()),
                         "channel_id": ctx.channel_id().get(),
                     });
-                    
-                    let _session = auth_service.create_session(
-                        user_id,
-                        "discord",
-                        &format!("{}", discord_id),
-                        session_metadata,
-                    ).await;
+
+                    let _session = auth_service
+                        .create_session(
+                            user_id,
+                            "discord",
+                            &format!("{}", discord_id),
+                            session_metadata,
+                        )
+                        .await;
 
                     let embed = serenity::CreateEmbed::new()
                         .title("Account Linked!")
@@ -238,7 +248,9 @@ pub async fn auth(
                     tracing::error!("Linking code error: {}", e);
                     let embed = serenity::CreateEmbed::new()
                         .title("Link Failed")
-                        .description("An error occurred while redeeming the linking code. Please try again.")
+                        .description(
+                            "An error occurred while redeeming the linking code. Please try again.",
+                        )
                         .color(0xFF6B6B);
 
                     ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
@@ -257,7 +269,10 @@ pub async fn auth(
                     "avatar": ctx.author().avatar_url(),
                 });
 
-                if let Err(e) = auth_service.link_platform(user_id, "discord", &discord_id.to_string(), metadata).await {
+                if let Err(e) = auth_service
+                    .link_platform(user_id, "discord", &discord_id.to_string(), metadata)
+                    .await
+                {
                     tracing::error!("Failed to link Discord to new user: {}", e);
                 }
 
@@ -266,13 +281,15 @@ pub async fn auth(
                     "guild_id": ctx.guild_id().map(|g| g.get()),
                     "channel_id": ctx.channel_id().get(),
                 });
-                
-                let _session = auth_service.create_session(
-                    user_id,
-                    "discord",
-                    &format!("{}", discord_id),
-                    session_metadata,
-                ).await;
+
+                let _session = auth_service
+                    .create_session(
+                        user_id,
+                        "discord",
+                        &format!("{}", discord_id),
+                        session_metadata,
+                    )
+                    .await;
 
                 let embed = serenity::CreateEmbed::new()
                     .title("Welcome to Nysa!")
@@ -290,7 +307,9 @@ pub async fn auth(
                 tracing::error!("Failed to create user: {}", e);
                 let embed = serenity::CreateEmbed::new()
                     .title("Account Creation Failed")
-                    .description("An error occurred while creating your account. Please try again later.")
+                    .description(
+                        "An error occurred while creating your account. Please try again later.",
+                    )
                     .color(0xFF6B6B);
 
                 ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
@@ -304,9 +323,7 @@ pub async fn auth(
 
 /// Generate a linking code for cross-platform authentication
 #[poise::command(slash_command, prefix_command, rename = "link")]
-pub async fn generate_link(
-    ctx: Context<'_>,
-) -> Result<(), Error> {
+pub async fn generate_link(ctx: Context<'_>) -> Result<(), Error> {
     let db = ctx.data().db.clone();
     let discord_id = ctx.author().id.get();
     let auth_service = AuthService::new(db.clone());
@@ -387,11 +404,16 @@ pub async fn compact(
 
     // TODO: Implement actual compaction logic
     if let Some(thread_id) = thread_id {
-        ctx.say(format!("Compacting thread: {} (Not yet implemented)", thread_id)).await?;
+        ctx.say(format!(
+            "Compacting thread: {} (Not yet implemented)",
+            thread_id
+        ))
+        .await?;
     } else {
-        ctx.say("Compacting current thread... (Not yet implemented)").await?;
+        ctx.say("Compacting current thread... (Not yet implemented)")
+            .await?;
     }
-    
+
     Ok(())
 }
 
@@ -430,9 +452,19 @@ pub async fn newthread(
         )
         .await?;
 
+    let user = existing_user.unwrap();
+    let thread_state = ctx
+        .data()
+        .thread_manager
+        .register_channel_thread(thread.id.get(), user.id, None)
+        .await;
+
     let embed = serenity::CreateEmbed::new()
         .title("New Thread Started")
-        .description(format!("Created thread: {}", thread_name))
+        .description(format!(
+            "Created thread: {}\nConversation ID: `{}`",
+            thread_name, thread_state.id
+        ))
         .color(0x4ADE80);
 
     thread
@@ -447,9 +479,7 @@ pub async fn newthread(
 
 /// Display help information
 #[poise::command(slash_command, prefix_command)]
-pub async fn help(
-    ctx: Context<'_>,
-) -> Result<(), Error> {
+pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
     let embed = serenity::CreateEmbed::new()
         .title("Nysa Help")
         .description("Here are the available commands:")
@@ -493,9 +523,7 @@ pub async fn help(
 
 /// Manage user settings
 #[poise::command(slash_command, prefix_command, rename = "settings")]
-pub async fn settings(
-    ctx: Context<'_>,
-) -> Result<(), Error> {
+pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     let db = ctx.data().db.clone();
     let discord_id = ctx.author().id.get();
 

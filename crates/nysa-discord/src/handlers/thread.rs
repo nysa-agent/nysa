@@ -1,8 +1,8 @@
+use chrono::{Duration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
 
 use crate::models::ThreadState;
 
@@ -17,6 +17,8 @@ pub struct ThreadManager {
     user_threads: Arc<RwLock<HashMap<u64, Uuid>>>,
     /// Thread timeout duration (30 minutes of inactivity)
     thread_timeout: Duration,
+    /// Per-channel processing locks to guarantee sequential message handling
+    processing_locks: Arc<RwLock<HashMap<u64, Arc<Mutex<()>>>>>,
 }
 
 /// Represents a thread creation context
@@ -35,9 +37,7 @@ pub enum ThreadContext {
         thread_name: String,
     },
     /// Thread created in DMs
-    DirectMessage {
-        user_id: u64,
-    },
+    DirectMessage { user_id: u64 },
     /// Thread revived from an old conversation
     Revival {
         original_thread_id: Uuid,
@@ -52,15 +52,20 @@ impl Clone for ThreadManager {
             threads_by_uuid: Arc::clone(&self.threads_by_uuid),
             user_threads: Arc::clone(&self.user_threads),
             thread_timeout: self.thread_timeout,
+            processing_locks: Arc::clone(&self.processing_locks),
         }
     }
 }
 
 impl ThreadManager {
     pub fn new() -> Self {
-        let active_threads: Arc<RwLock<HashMap<u64, ThreadState>>> = Arc::new(RwLock::new(HashMap::new()));
-        let threads_by_uuid: Arc<RwLock<HashMap<Uuid, ThreadState>>> = Arc::new(RwLock::new(HashMap::new()));
+        let active_threads: Arc<RwLock<HashMap<u64, ThreadState>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        let threads_by_uuid: Arc<RwLock<HashMap<Uuid, ThreadState>>> =
+            Arc::new(RwLock::new(HashMap::new()));
         let user_threads: Arc<RwLock<HashMap<u64, Uuid>>> = Arc::new(RwLock::new(HashMap::new()));
+        let processing_locks: Arc<RwLock<HashMap<u64, Arc<Mutex<()>>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
 
         let threads_clone = Arc::clone(&active_threads);
         let uuid_clone = Arc::clone(&threads_by_uuid);
@@ -71,21 +76,21 @@ impl ThreadManager {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
-                
+
                 let now = Utc::now();
                 let timeout = Duration::minutes(30);
-                
+
                 let mut threads = threads_clone.write().await;
                 let mut uuid_threads = uuid_clone.write().await;
                 let mut user_map = user_threads_clone.write().await;
-                
+
                 // Find expired threads
                 let expired: Vec<u64> = threads
                     .iter()
                     .filter(|(_, state)| now.signed_duration_since(state.last_message_at) > timeout)
                     .map(|(id, _)| *id)
                     .collect();
-                
+
                 for channel_id in expired {
                     if let Some(state) = threads.remove(&channel_id) {
                         uuid_threads.remove(&state.id);
@@ -104,6 +109,7 @@ impl ThreadManager {
             threads_by_uuid,
             user_threads,
             thread_timeout: Duration::minutes(30),
+            processing_locks,
         }
     }
 
@@ -164,7 +170,11 @@ impl ThreadManager {
     }
 
     /// Get or create a DM thread for a user
-    pub async fn get_or_create_dm_thread(&self, user_discord_id: u64, user_uuid: Uuid) -> ThreadState {
+    pub async fn get_or_create_dm_thread(
+        &self,
+        user_discord_id: u64,
+        user_uuid: Uuid,
+    ) -> ThreadState {
         // Check if there's an existing DM thread
         let should_update = {
             let user_map = self.user_threads.read().await;
@@ -190,7 +200,7 @@ impl ThreadManager {
         if let Some((discord_channel_id, thread_id)) = should_update {
             let mut threads = self.active_threads.write().await;
             let mut uuid_threads = self.threads_by_uuid.write().await;
-            
+
             if let Some(mut state) = threads.get(&discord_channel_id).cloned() {
                 state.last_message_at = Utc::now();
                 threads.insert(discord_channel_id, state.clone());
@@ -199,10 +209,10 @@ impl ThreadManager {
             }
         }
 
-        // Create new DM thread
-        let discord_channel_id = user_discord_id; // In DMs, the channel ID is the user ID
+        // Create new DM thread using a dedicated keyspace to avoid collisions with guild channels
+        let discord_channel_id = user_discord_id | (1_u64 << 63);
         let thread_state = ThreadState::new(discord_channel_id, user_uuid);
-        let mut state = thread_state.clone();
+        let state = thread_state.clone();
 
         {
             let mut threads = self.active_threads.write().await;
@@ -234,7 +244,7 @@ impl ThreadManager {
             let uuid_threads = self.threads_by_uuid.read().await;
             uuid_threads.get(&original_thread_id).cloned()
         };
-        
+
         if let Some(old_state) = old_state {
             let user_id = old_state.user_id;
 
@@ -285,7 +295,7 @@ impl ThreadManager {
         }
     }
 
-    /// Add a message ID to an existing thread
+    /// Add a message ID to an existing thread by channel key
     pub async fn add_message_to_thread(&self, discord_channel_id: u64, message_id: u64) {
         let mut threads = self.active_threads.write().await;
         let mut uuid_threads = self.threads_by_uuid.write().await;
@@ -295,14 +305,16 @@ impl ThreadManager {
             state.last_message_at = Utc::now();
             threads.insert(discord_channel_id, state.clone());
             uuid_threads.insert(state.id, state);
-            
-            tracing::debug!(
-                "Added message {} to thread {} in channel {}, message_ids={:?}",
-                message_id,
-                threads.get(&discord_channel_id).unwrap().id,
-                discord_channel_id,
-                threads.get(&discord_channel_id).unwrap().message_ids
-            );
+
+            if let Some(updated) = threads.get(&discord_channel_id) {
+                tracing::debug!(
+                    "Added message {} to thread {} in channel {}, message_ids={:?}",
+                    message_id,
+                    updated.id,
+                    discord_channel_id,
+                    updated.message_ids
+                );
+            }
         } else {
             tracing::warn!(
                 "No thread found in channel {} to add message {}",
@@ -321,7 +333,7 @@ impl ThreadManager {
         if let Some(state) = threads.remove(&discord_channel_id) {
             uuid_threads.remove(&state.id);
             user_map.retain(|_, thread_id| *thread_id != state.id);
-            
+
             tracing::info!("Closed thread {}", state.id);
             true
         } else {
@@ -364,7 +376,7 @@ impl ThreadManager {
             parent_message_id,
             threads.len()
         );
-        
+
         for (channel_id, thread) in threads.iter() {
             tracing::debug!(
                 "Thread {} in channel {}: message_ids={:?}, contains={}",
@@ -374,12 +386,12 @@ impl ThreadManager {
                 thread.contains_message(parent_message_id)
             );
         }
-        
+
         let result = threads
             .values()
             .find(|t| t.contains_message(parent_message_id))
             .cloned();
-        
+
         if let Some(ref thread) = result {
             tracing::info!(
                 "Found thread {} for parent_message_id {}",
@@ -392,8 +404,92 @@ impl ThreadManager {
                 parent_message_id
             );
         }
-        
+
         result
+    }
+
+    /// Add a message ID to an existing thread by thread UUID
+    pub async fn add_message_to_thread_by_uuid(&self, thread_id: Uuid, message_id: u64) -> bool {
+        let maybe_state = {
+            let uuid_threads = self.threads_by_uuid.read().await;
+            uuid_threads.get(&thread_id).cloned()
+        };
+
+        if let Some(state) = maybe_state {
+            self.add_message_to_thread(state.discord_channel_id, message_id)
+                .await;
+            true
+        } else {
+            tracing::warn!(
+                "No thread found by UUID {} to add message {}",
+                thread_id,
+                message_id
+            );
+            false
+        }
+    }
+
+    /// Update activity for a thread by thread UUID
+    pub async fn update_activity_by_uuid(&self, thread_id: Uuid) -> bool {
+        let maybe_state = {
+            let uuid_threads = self.threads_by_uuid.read().await;
+            uuid_threads.get(&thread_id).cloned()
+        };
+
+        if let Some(state) = maybe_state {
+            self.update_activity(state.discord_channel_id).await;
+            true
+        } else {
+            tracing::warn!("No thread found by UUID {} to update activity", thread_id);
+            false
+        }
+    }
+
+    /// Ensure a per-channel processing mutex exists and return it.
+    /// Callers can lock it to enforce sequential processing for a channel.
+    pub async fn get_or_create_processing_lock(&self, channel_id: u64) -> Arc<Mutex<()>> {
+        {
+            let locks = self.processing_locks.read().await;
+            if let Some(lock) = locks.get(&channel_id) {
+                return Arc::clone(lock);
+            }
+        }
+
+        let mut locks = self.processing_locks.write().await;
+        Arc::clone(
+            locks
+                .entry(channel_id)
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
+    }
+
+    /// Register a conversational thread against a specific Discord channel key.
+    /// Useful for externally-created Discord threads (e.g. /newthread).
+    pub async fn register_channel_thread(
+        &self,
+        discord_channel_id: u64,
+        user_id: Uuid,
+        seed_message_id: Option<u64>,
+    ) -> ThreadState {
+        let mut threads = self.active_threads.write().await;
+        let mut uuid_threads = self.threads_by_uuid.write().await;
+
+        let mut state = ThreadState::new(discord_channel_id, user_id);
+        if let Some(message_id) = seed_message_id {
+            state.discord_thread_id = Some(message_id);
+            state.add_message(message_id);
+        }
+
+        threads.insert(discord_channel_id, state.clone());
+        uuid_threads.insert(state.id, state.clone());
+
+        tracing::info!(
+            "Registered conversational thread {} for channel {}",
+            state.id,
+            discord_channel_id
+        );
+
+        state
     }
 }
 
