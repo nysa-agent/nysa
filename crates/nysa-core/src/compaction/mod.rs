@@ -38,9 +38,12 @@ impl CompactionService {
         Self
     }
 
-    pub async fn compact_thread(&self, thread_id: Uuid) -> Result<CompactionResult, CompactionError> {
+    pub async fn compact_thread(
+        &self,
+        thread_id: Uuid,
+    ) -> Result<CompactionResult, CompactionError> {
         tracing::info!("Compacting thread {}", thread_id);
-        
+
         Ok(CompactionResult {
             thread_id,
             original_message_count: 0,
@@ -49,13 +52,20 @@ impl CompactionService {
         })
     }
 
-    pub async fn get_thread_context(&self, thread_id: Uuid, _query: &str) -> Result<Vec<SearchResult>, CompactionError> {
+    pub async fn get_thread_context(
+        &self,
+        thread_id: Uuid,
+        _query: &str,
+    ) -> Result<Vec<SearchResult>, CompactionError> {
         tracing::info!("Getting context for thread {}", thread_id);
-        
+
         Ok(Vec::new())
     }
 
-    pub async fn trigger_compaction(&self, thread_id: Uuid) -> Result<CompactionResult, CompactionError> {
+    pub async fn trigger_compaction(
+        &self,
+        thread_id: Uuid,
+    ) -> Result<CompactionResult, CompactionError> {
         self.compact_thread(thread_id).await
     }
 }
@@ -77,7 +87,10 @@ impl CompactionManager {
         CompactionService::new()
     }
 
-    pub async fn cleanup_old_threads(&self, _idle_threshold: chrono::Duration) -> Result<usize, CompactionError> {
+    pub async fn cleanup_old_threads(
+        &self,
+        _idle_threshold: chrono::Duration,
+    ) -> Result<usize, CompactionError> {
         Ok(0)
     }
 }

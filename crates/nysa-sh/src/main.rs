@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use nysa_core::App;
 use nysa_core::config::{AiConfigBuilder, ChatConfigBuilder, EmbeddingConfigBuilder};
+use nysa_core::{App, ToolsReady};
 use nysa_discord::models::{ChannelMode, DmMode};
 use nysa_discord::{DiscordExtension, DiscordExtensionConfig, UnauthMessage};
 use sea_orm::Database;
@@ -143,12 +143,13 @@ async fn main() -> anyhow::Result<()> {
 
     let db_clone = db.clone();
 
-    let mut app_builder = App::builder(db).extension(DiscordExtension::new(discord_config, db_clone));
+    let mut app_builder =
+        App::builder(db).extension(DiscordExtension::new(discord_config, db_clone));
 
     // Configure AI if provided
     if let Some(ai_config) = config.ai {
         tracing::info!("Configuring AI with model: {}", ai_config.chat.model);
-        
+
         let mut chat_builder = ChatConfigBuilder::new()
             .base_url(ai_config.chat.base_url)
             .api_key(ai_config.chat.api_key)
@@ -193,6 +194,16 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = app_builder.build().await?;
+
+    let mut tools_ready_rx = app.event_bus().subscribe::<ToolsReady>();
+
+    tracing::info!("Waiting for tools to be ready...");
+    let ready = tools_ready_rx.recv().await?;
+    tracing::info!(
+        "Tools ready from extension '{}' (reported {} tools)",
+        ready.extension_name,
+        ready.tool_count
+    );
 
     tracing::info!("Registered tools:");
     {
