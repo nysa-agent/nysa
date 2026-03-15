@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use sea_orm::DatabaseConnection;
 use tokio::sync::RwLock;
-use tracing::{error, info, Subscriber};
+use tracing::{Subscriber, error, info};
 use tracing_subscriber::{
     EnvFilter,
     fmt::{FormatEvent, FormatFields},
@@ -15,7 +15,7 @@ use crate::compaction::CompactionManager;
 use crate::config::{AiConfig, Config};
 use crate::extension::{EventBus, Extension, ExtensionContext, ExtensionManager};
 use crate::llm::{ConversationManager, LlmClient, LlmConfig, MessageHistoryService};
-use crate::tool::{ToolDefinition, ToolHandler, ToolExecutor, ToolRegistry};
+use crate::tool::{ToolDefinition, ToolExecutor, ToolHandler, ToolRegistry};
 
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -136,7 +136,11 @@ impl AppBuilder {
         self
     }
 
-    pub fn tool<H: ToolHandler + 'static>(mut self, definition: ToolDefinition, handler: H) -> Self {
+    pub fn tool<H: ToolHandler + 'static>(
+        mut self,
+        definition: ToolDefinition,
+        handler: H,
+    ) -> Self {
         self.tool_registry.register(definition, handler);
         self
     }
@@ -152,24 +156,26 @@ impl AppBuilder {
 
         let event_bus = Arc::new(EventBus::new());
 
-        self.extensions.register_tools(&mut self.tool_registry).await;
+        self.extensions
+            .register_tools(&mut self.tool_registry)
+            .await;
 
         let tool_registry = Arc::new(RwLock::new(self.tool_registry));
         let tool_executor = Arc::new(ToolExecutor::new(Arc::clone(&tool_registry)));
 
         let config = Arc::new(self.config);
-        
+
         let auth_service = AuthService::new(self.database.clone());
         let compaction_manager = CompactionManager::new(self.database.clone());
 
         // Build conversation manager if AI is configured
         let conversation_manager = if let Some(ref ai_config) = config.ai {
             info!("Building conversation manager with AI configuration");
-            
+
             let llm_client = Arc::new(LlmClient::new(&ai_config.chat));
             let history_service = Arc::new(MessageHistoryService::new(self.database.clone()));
             let compaction_service = compaction_manager.service();
-            
+
             let llm_config = LlmConfig {
                 max_context_tokens: 120_000,
                 compaction_threshold: 0.8,
@@ -177,7 +183,7 @@ impl AppBuilder {
                 default_mode: crate::llm::ResponseMode::Batch,
                 system_prompt_override: None,
             };
-            
+
             Some(Arc::new(ConversationManager::new(
                 llm_client,
                 history_service,
@@ -194,6 +200,8 @@ impl AppBuilder {
             self.database.clone(),
             config.clone(),
             self.extensions.cancellation_token(),
+            Arc::clone(&tool_registry),
+            Arc::clone(&event_bus),
         )
         .with_auth_service(auth_service)
         .with_compaction_manager(compaction_manager);

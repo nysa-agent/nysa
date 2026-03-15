@@ -9,6 +9,14 @@ use uuid::Uuid;
 pub trait Event: Send + Sync + Clone + 'static {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolsReady {
+    pub extension_name: String,
+    pub tool_count: usize,
+}
+
+impl Event for ToolsReady {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageReceived {
     pub source: MessageSource,
     pub content: String,

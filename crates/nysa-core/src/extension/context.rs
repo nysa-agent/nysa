@@ -30,11 +30,13 @@ impl ExtensionContext {
         database: DatabaseConnection,
         config: Arc<Config>,
         cancellation_token: CancellationToken,
+        tool_registry: Arc<RwLock<ToolRegistry>>,
+        event_bus: SharedEventBus,
     ) -> Self {
         Self {
-            tool_registry: Arc::new(RwLock::new(ToolRegistry::new())),
+            tool_registry,
             database: Arc::new(database),
-            event_bus: Arc::new(EventBus::new()),
+            event_bus,
             config,
             cancellation_token,
             auth_service: None,
@@ -58,7 +60,7 @@ impl ExtensionContext {
         self.conversation_manager = Some(manager);
         self
     }
-    
+
     pub fn auth(&self) -> Option<&Arc<AuthService>> {
         self.auth_service.as_ref()
     }
@@ -70,12 +72,12 @@ impl ExtensionContext {
     pub fn conversation(&self) -> Option<&Arc<ConversationManager>> {
         self.conversation_manager.as_ref()
     }
-    
+
     pub fn store<T: 'static + Send + Sync>(&self, value: T) {
         let mut state = self.state.write();
         state.insert(TypeId::of::<T>(), Arc::new(value));
     }
-    
+
     pub fn get<T: 'static + Clone + Send + Sync>(&self) -> Option<T> {
         let state = self.state.read();
         state
@@ -83,7 +85,7 @@ impl ExtensionContext {
             .and_then(|v| v.downcast_ref::<T>())
             .cloned()
     }
-    
+
     pub fn spawn_task<F>(&self, _name: &str, future: F) -> tokio::task::JoinHandle<()>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
@@ -96,7 +98,7 @@ impl ExtensionContext {
             }
         })
     }
-    
+
     pub fn is_shutting_down(&self) -> bool {
         self.cancellation_token.is_cancelled()
     }

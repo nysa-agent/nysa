@@ -4,8 +4,13 @@ pub mod event;
 pub mod factory;
 pub mod manager;
 
-pub use base::{BackgroundTask, BoxFuture, Extension, ExtensionConfig, ExtensionDef, ExtensionError};
+pub use base::{
+    BackgroundTask, BoxFuture, Extension, ExtensionConfig, ExtensionDef, ExtensionError,
+};
 pub use context::ExtensionContext;
-pub use event::{Event, EventBus, MessageReceived, MessageSource, MessageTarget, MessageToSend, SharedEventBus};
+pub use event::{
+    Event, EventBus, MessageReceived, MessageSource, MessageTarget, MessageToSend, SharedEventBus,
+    ToolsReady,
+};
 pub use factory::{ExtensionFactoryRegistry, ExtensionFactoryRegistryBuilder};
 pub use manager::{ExtensionManager, ExtensionManagerBuilder};
