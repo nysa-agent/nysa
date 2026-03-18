@@ -97,6 +97,10 @@ impl Extension for DiscordExtension {
         )
     }
 
+    fn prompt_provider(&self) -> Option<&dyn PromptProvider> {
+        Some(self)
+    }
+
     fn register_tools(&self, _registry: &mut ToolRegistry) {
         // Tools will be registered when we have access to the Discord context
         // This happens in the background task when the client is initialized
