@@ -176,6 +176,10 @@ impl ToolRegistry {
             .collect()
     }
 
+    pub fn unregister(&mut self, name: &str) -> Option<ToolDefinition> {
+        self.remove(name)
+    }
+
     pub fn remove(&mut self, name: &str) -> Option<ToolDefinition> {
         let removed = self.tools.remove(name);
         removed.map(|t| {
