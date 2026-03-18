@@ -20,10 +20,10 @@ pub use compaction::{
 pub use config::{Config, ConfigBuilder};
 pub use context::{MessageContext, Platform, PlatformDetails, UserContext, format_system_context};
 pub use extension::{
-    BackgroundTask, BoxFuture, Event, EventBus, Extension, ExtensionConfig, ExtensionContext,
-    ExtensionDef, ExtensionError, ExtensionFactoryRegistry, ExtensionFactoryRegistryBuilder,
-    ExtensionManager, ExtensionManagerBuilder, MessageReceived, MessageSource, MessageTarget,
-    MessageToSend, SharedEventBus, ToolsReady,
+    BackgroundTask, BoxFuture, Event, EventBus, Extension, ExtensionDef, ExtensionError,
+    ExtensionFactoryRegistry, ExtensionFactoryRegistryBuilder, ExtensionManager,
+    ExtensionManagerBuilder, ExtensionContext, MessageReceived, MessageSource, MessageTarget,
+    MessageToSend, RestartPolicy, SharedEventBus, ToolsReady,
 };
 pub use llm::{
     Author, ConversationManager, ConversationMessage, ConversationResponse, LlmClient, LlmConfig,

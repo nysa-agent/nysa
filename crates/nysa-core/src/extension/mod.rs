@@ -5,7 +5,8 @@ pub mod factory;
 pub mod manager;
 
 pub use base::{
-    BackgroundTask, BoxFuture, Extension, ExtensionConfig, ExtensionDef, ExtensionError,
+    BackgroundTask, BoxFuture, Extension, ExtensionDef, ExtensionDescription, ExtensionError,
+    RestartPolicy,
 };
 pub use context::ExtensionContext;
 pub use event::{
