@@ -8,6 +8,18 @@ use uuid::Uuid;
 
 pub trait Event: Send + Sync + Clone + 'static {}
 
+struct EventBusChannels {
+    channels: parking_lot::RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
+}
+
+impl EventBusChannels {
+    fn new() -> Self {
+        Self {
+            channels: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsReady {
     pub extension_name: String,
@@ -64,20 +76,20 @@ pub enum MessageTarget {
 const DEFAULT_CHANNEL_CAPACITY: usize = 1024;
 
 pub struct EventBus {
-    channels: parking_lot::RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
+    inner: Arc<EventBusChannels>,
 }
 
 impl EventBus {
     pub fn new() -> Self {
         Self {
-            channels: Default::default(),
+            inner: Arc::new(EventBusChannels::new()),
         }
     }
 
     pub fn publish<E: Event>(&self, event: E) {
         let type_id = TypeId::of::<E>();
 
-        let channels = self.channels.read();
+        let channels = self.inner.channels.read();
         if let Some(sender) = channels.get(&type_id) {
             if let Some(tx) = sender.downcast_ref::<broadcast::Sender<E>>() {
                 let _ = tx.send(event);
@@ -89,7 +101,7 @@ impl EventBus {
         let type_id = TypeId::of::<E>();
 
         {
-            let channels = self.channels.read();
+            let channels = self.inner.channels.read();
             if let Some(sender) = channels.get(&type_id) {
                 if let Some(tx) = sender.downcast_ref::<broadcast::Sender<E>>() {
                     return tx.subscribe();
@@ -97,7 +109,7 @@ impl EventBus {
             }
         }
 
-        let mut channels = self.channels.write();
+        let mut channels = self.inner.channels.write();
         let (tx, rx) = broadcast::channel(DEFAULT_CHANNEL_CAPACITY);
         channels.insert(type_id, Box::new(tx));
         rx
@@ -105,7 +117,7 @@ impl EventBus {
 
     pub fn has_subscribers<E: Event>(&self) -> bool {
         let type_id = TypeId::of::<E>();
-        let channels = self.channels.read();
+        let channels = self.inner.channels.read();
         channels.contains_key(&type_id)
     }
 }
@@ -119,7 +131,7 @@ impl Default for EventBus {
 impl Clone for EventBus {
     fn clone(&self) -> Self {
         Self {
-            channels: parking_lot::RwLock::new(HashMap::new()),
+            inner: Arc::clone(&self.inner),
         }
     }
 }
