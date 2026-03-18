@@ -9,9 +9,11 @@ use tokio_util::sync::CancellationToken;
 use crate::auth::AuthService;
 use crate::compaction::CompactionManager;
 use crate::config::Config;
-use crate::extension::event::{EventBus, SharedEventBus};
+use crate::extension::event::SharedEventBus;
 use crate::llm::ConversationManager;
 use crate::tool::ToolRegistry;
+
+type SharedState = Arc<parking_lot::RwLock<HashMap<TypeId, Arc<dyn std::any::Any + Send + Sync>>>>;
 
 pub struct ExtensionContext {
     pub tool_registry: Arc<RwLock<ToolRegistry>>,
@@ -22,7 +24,7 @@ pub struct ExtensionContext {
     auth_service: Option<Arc<AuthService>>,
     compaction_manager: Option<Arc<CompactionManager>>,
     conversation_manager: Option<Arc<ConversationManager>>,
-    state: parking_lot::RwLock<HashMap<TypeId, Arc<dyn std::any::Any + Send + Sync>>>,
+    state: SharedState,
 }
 
 impl ExtensionContext {
@@ -42,7 +44,7 @@ impl ExtensionContext {
             auth_service: None,
             compaction_manager: None,
             conversation_manager: None,
-            state: parking_lot::RwLock::new(HashMap::new()),
+            state: Arc::new(parking_lot::RwLock::new(HashMap::new())),
         }
     }
 
@@ -78,23 +80,28 @@ impl ExtensionContext {
         state.insert(TypeId::of::<T>(), Arc::new(value));
     }
 
-    pub fn get<T: 'static + Clone + Send + Sync>(&self) -> Option<T> {
+    pub fn get<T: 'static + Send + Sync>(&self) -> Option<Arc<T>> {
         let state = self.state.read();
         state
             .get(&TypeId::of::<T>())
-            .and_then(|v| v.downcast_ref::<T>())
+            .and_then(|v| v.downcast_ref::<Arc<T>>())
             .cloned()
     }
 
-    pub fn spawn_task<F>(&self, _name: &str, future: F) -> tokio::task::JoinHandle<()>
+    pub fn spawn_task<F>(&self, name: &str, future: F) -> tokio::task::JoinHandle<()>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         let token = self.cancellation_token.clone();
+        let task_name = name.to_string();
         tokio::spawn(async move {
             tokio::select! {
-                _ = future => {}
-                _ = token.cancelled() => {}
+                _ = future => {
+                    tracing::debug!("Extension task '{}' completed", task_name);
+                }
+                _ = token.cancelled() => {
+                    tracing::debug!("Extension task '{}' cancelled", task_name);
+                }
             }
         })
     }
@@ -115,7 +122,7 @@ impl Clone for ExtensionContext {
             auth_service: self.auth_service.clone(),
             compaction_manager: self.compaction_manager.clone(),
             conversation_manager: self.conversation_manager.clone(),
-            state: parking_lot::RwLock::new(HashMap::new()),
+            state: Arc::clone(&self.state),
         }
     }
 }
