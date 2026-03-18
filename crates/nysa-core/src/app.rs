@@ -13,7 +13,7 @@ use tracing_subscriber::{
 use crate::auth::AuthService;
 use crate::compaction::CompactionManager;
 use crate::config::{AiConfig, Config};
-use crate::extension::{EventBus, Extension, ExtensionContext, ExtensionManager};
+use crate::extension::{EventBus, Extension, ExtensionContext, ExtensionFactoryRegistry, ExtensionManager};
 use crate::llm::{ConversationManager, LlmClient, LlmConfig, MessageHistoryService};
 use crate::tool::{ToolDefinition, ToolExecutor, ToolHandler, ToolRegistry};
 
@@ -96,7 +96,12 @@ impl App {
 
     pub async fn shutdown(mut self) -> anyhow::Result<()> {
         info!("Shutting down Nysa...");
-        self.extensions.stop_all().await?;
+        if let Err(errors) = self.extensions.stop_all().await {
+            for err in &errors {
+                error!("Extension shutdown error: {}", err);
+            }
+            anyhow::bail!("{} extension(s) failed to stop cleanly", errors.len());
+        }
         info!("Shutdown complete");
         Ok(())
     }
@@ -107,6 +112,7 @@ pub struct AppBuilder {
     config: Config,
     extensions: ExtensionManager,
     tool_registry: ToolRegistry,
+    factory_registry: Option<ExtensionFactoryRegistry>,
     shutdown_timeout: Duration,
 }
 
@@ -117,6 +123,7 @@ impl AppBuilder {
             config: Config::default(),
             extensions: ExtensionManager::new(),
             tool_registry: ToolRegistry::new(),
+            factory_registry: None,
             shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
         }
     }
@@ -133,6 +140,24 @@ impl AppBuilder {
 
     pub fn extension<E: Extension>(mut self, extension: E) -> Self {
         self.extensions.register(extension);
+        self
+    }
+
+    pub fn factory_registry(mut self, registry: ExtensionFactoryRegistry) -> Self {
+        self.factory_registry = Some(registry);
+        self
+    }
+
+    pub fn extension_from_config(
+        mut self,
+        name: &str,
+        config: serde_json::Value,
+    ) -> Self {
+        if let Some(ref factory) = self.factory_registry {
+            if let Some(ext) = factory.create(name, config) {
+                self.extensions.register_boxed(ext);
+            }
+        }
         self
     }
 
