@@ -1,13 +1,15 @@
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::extension::base::{Extension, ExtensionError};
+use crate::extension::base::{BackgroundTask, Extension, ExtensionError, RestartPolicy};
 use crate::extension::context::ExtensionContext;
 use crate::tool::ToolRegistry;
 
@@ -15,14 +17,187 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 type ExtensionHolder = Arc<dyn Extension>;
 
+struct TaskSupervisor {
+    extension: ExtensionHolder,
+    ctx: ExtensionContext,
+    task_name: &'static str,
+    restart_policy: RestartPolicy,
+    restart_count: AtomicU32,
+    failed: Arc<AtomicBool>,
+    error: Mutex<Option<ExtensionError>>,
+    stop_token: CancellationToken,
+}
+
+impl TaskSupervisor {
+    fn new(
+        extension: ExtensionHolder,
+        ctx: ExtensionContext,
+        task_name: &'static str,
+        restart_policy: RestartPolicy,
+        stop_token: CancellationToken,
+    ) -> Self {
+        Self {
+            extension,
+            ctx,
+            task_name,
+            restart_policy,
+            restart_count: AtomicU32::new(0),
+            failed: Arc::new(AtomicBool::new(false)),
+            error: Mutex::new(None),
+            stop_token,
+        }
+    }
+
+    async fn run(self: Arc<Self>) {
+        loop {
+            if self.stop_token.is_cancelled() {
+                info!(
+                    "Task supervisor for '{}' received stop signal",
+                    self.task_name
+                );
+                break;
+            }
+
+            let task = match self.extension.background_task(&self.ctx) {
+                Some(t) => t,
+                None => {
+                    info!(
+                        "Extension '{}' no longer provides background task, stopping supervisor",
+                        self.extension.name()
+                    );
+                    break;
+                }
+            };
+
+            let result = self.run_task(task).await;
+
+            match result {
+                Ok(()) => {
+                    info!(
+                        "Background task '{}' for extension '{}' completed normally",
+                        self.task_name,
+                        self.extension.name()
+                    );
+                    break;
+                }
+                Err(e) => {
+                    if self.stop_token.is_cancelled() {
+                        break;
+                    }
+
+                    let max_restarts = self.restart_policy.max_restarts();
+                    let current_restarts = self.restart_count.load(Ordering::SeqCst);
+
+                    if current_restarts >= max_restarts {
+                        error!(
+                            "Background task '{}' for extension '{}' failed (restart {}/{}): {}",
+                            self.task_name,
+                            self.extension.name(),
+                            current_restarts,
+                            max_restarts,
+                            e
+                        );
+                        self.failed.store(true, Ordering::SeqCst);
+                        *self.error.lock().await = Some(e);
+                        break;
+                    }
+
+                    self.failed.store(true, Ordering::SeqCst);
+                    *self.error.lock().await = Some(e.clone());
+                    self.restart_count.fetch_add(1, Ordering::SeqCst);
+
+                    if let Some(delay) = self.calculate_backoff(current_restarts) {
+                        warn!(
+                            "Background task '{}' for extension '{}' failed, restarting in {:?} (restart {}/{})",
+                            self.task_name,
+                            self.extension.name(),
+                            delay,
+                            current_restarts + 1,
+                            max_restarts
+                        );
+                        tokio::select! {
+                            _ = tokio::time::sleep(delay) => {}
+                            _ = self.stop_token.cancelled() => {
+                                info!("Task supervisor for '{}' cancelled during backoff", self.task_name);
+                                break;
+                            }
+                        }
+                    } else {
+                        tokio::task::yield_now().await;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn run_task(&self, mut task: BackgroundTask) -> Result<(), ExtensionError> {
+        let token = self.stop_token.clone();
+
+        tokio::select! {
+            result = &mut task.task => result,
+            _ = token.cancelled() => {
+                info!(
+                    "Background task '{}' for extension '{}' cancelled",
+                    self.task_name,
+                    self.extension.name()
+                );
+                Ok(())
+            }
+        }
+    }
+
+    fn calculate_backoff(&self, attempt: u32) -> Option<Duration> {
+        match &self.restart_policy {
+            RestartPolicy::Never => None,
+            RestartPolicy::Immediately { .. } => Some(Duration::ZERO),
+            RestartPolicy::WithBackoff {
+                min,
+                max,
+                factor,
+                ..
+            } => {
+                let delay = min.saturating_mul(factor.pow(attempt)).min(*max);
+                if delay.is_zero() {
+                    Some(Duration::ZERO)
+                } else {
+                    Some(delay)
+                }
+            }
+        }
+    }
+
+    fn is_failed(&self) -> bool {
+        self.failed.load(Ordering::SeqCst)
+    }
+
+    fn get_error(&self) -> Option<ExtensionError> {
+        self.error.try_lock().ok().and_then(|g| g.clone())
+    }
+
+    fn restart_count(&self) -> u32 {
+        self.restart_count.load(Ordering::SeqCst)
+    }
+}
+
 struct TaskHandle {
     name: &'static str,
     extension_name: String,
     handle: JoinHandle<()>,
+    supervisor: Arc<TaskSupervisor>,
+}
+
+pub struct TaskStatus {
+    pub name: &'static str,
+    pub extension_name: String,
+    pub is_running: bool,
+    pub failed: bool,
+    pub restart_count: u32,
+    pub error: Option<ExtensionError>,
 }
 
 pub struct ExtensionManager {
     extensions: HashMap<TypeId, ExtensionHolder>,
+    extensions_by_name: HashMap<&'static str, TypeId>,
     background_tasks: Vec<TaskHandle>,
     shutdown_timeout: Duration,
     cancellation_token: CancellationToken,
@@ -32,6 +207,7 @@ impl ExtensionManager {
     pub fn new() -> Self {
         Self {
             extensions: HashMap::new(),
+            extensions_by_name: HashMap::new(),
             background_tasks: Vec::new(),
             shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
             cancellation_token: CancellationToken::new(),
@@ -50,18 +226,56 @@ impl ExtensionManager {
     pub fn register<E: Extension>(&mut self, extension: E) {
         let type_id = TypeId::of::<E>();
         let holder: ExtensionHolder = Arc::new(extension) as Arc<dyn Extension>;
-        self.extensions.insert(type_id, holder);
+        self.extensions.insert(type_id, holder.clone());
+        self.extensions_by_name.insert(holder.name(), type_id);
     }
 
-    pub fn get<E: Extension>(&self) -> Option<&E> {
-        let type_id = TypeId::of::<E>();
-        self.extensions
-            .get(&type_id)
-            .and_then(|holder| holder.as_any().downcast_ref::<E>())
+    pub fn register_boxed(&mut self, extension: Box<dyn Extension>) {
+        let holder: ExtensionHolder = Arc::from(extension);
+        let type_id = TypeId::of::<Box<dyn Extension>>();
+        self.extensions.insert(type_id, holder.clone());
+        self.extensions_by_name.insert(holder.name(), type_id);
+    }
+
+    pub fn get_by_name(&self, name: &str) -> Option<&dyn Extension> {
+        self.extensions_by_name
+            .get(name)
+            .and_then(|type_id| self.extensions.get(type_id))
+            .map(|e| e.as_ref())
     }
 
     pub fn all(&self) -> Vec<&dyn Extension> {
         self.extensions.values().map(|e| e.as_ref()).collect()
+    }
+
+    pub fn names(&self) -> Vec<&'static str> {
+        self.extensions_by_name.keys().copied().collect()
+    }
+
+    pub fn is_registered(&self, name: &str) -> bool {
+        self.extensions_by_name.contains_key(name)
+    }
+
+    pub fn find(&self, predicate: impl Fn(&dyn Extension) -> bool) -> Vec<&dyn Extension> {
+        self.extensions
+            .values()
+            .filter(|e| predicate(e.as_ref()))
+            .map(|e| e.as_ref())
+            .collect()
+    }
+
+    pub fn task_status(&self) -> Vec<TaskStatus> {
+        self.background_tasks
+            .iter()
+            .map(|t| TaskStatus {
+                name: t.name,
+                extension_name: t.extension_name.clone(),
+                is_running: !t.handle.is_finished(),
+                failed: t.supervisor.is_failed(),
+                restart_count: t.supervisor.restart_count(),
+                error: t.supervisor.get_error(),
+            })
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -110,32 +324,29 @@ impl ExtensionManager {
                 }
             }
 
-            if let Some(task) = extension.background_task(ctx) {
-                let token = self.cancellation_token.clone();
+            if extension.background_task(ctx).is_some() {
                 let ext_name = name.to_string();
-                let task_name = task.name;
+                let ext_name_static = extension.name();
+                let restart_policy = extension.restart_policy();
 
+                let supervisor = Arc::new(TaskSupervisor::new(
+                    extension.clone(),
+                    ctx.clone(),
+                    ext_name_static,
+                    restart_policy,
+                    self.cancellation_token.clone(),
+                ));
+
+                let supervisor_handle = supervisor.clone();
                 let handle = tokio::spawn(async move {
-                    let result = tokio::select! {
-                        result = task.task => result,
-                        _ = token.cancelled() => {
-                            info!("Background task '{}' for extension '{}' received shutdown signal", task_name, ext_name);
-                            return;
-                        }
-                    };
-
-                    if let Err(e) = result {
-                        error!(
-                            "Background task '{}' for extension '{}' failed: {}",
-                            task_name, ext_name, e
-                        );
-                    }
+                    supervisor_handle.run().await;
                 });
 
                 self.background_tasks.push(TaskHandle {
-                    name: task.name,
-                    extension_name: name.to_string(),
+                    name: ext_name_static,
+                    extension_name: ext_name,
                     handle,
+                    supervisor,
                 });
             }
         }
@@ -144,7 +355,7 @@ impl ExtensionManager {
         Ok(())
     }
 
-    pub async fn stop_all(&mut self) -> Result<(), ExtensionError> {
+    pub async fn stop_all(&mut self) -> Result<(), Vec<ExtensionError>> {
         if self.extensions.is_empty() {
             return Ok(());
         }
@@ -170,6 +381,8 @@ impl ExtensionManager {
             }
         }
 
+        let mut errors = Vec::new();
+
         for extension in self.extensions.values() {
             let name = extension.name();
             let start = Instant::now();
@@ -183,18 +396,26 @@ impl ExtensionManager {
                 }
                 Ok(Err(e)) => {
                     error!("Extension '{}' failed to stop: {}", name, e);
+                    errors.push(e);
                 }
                 Err(_) => {
+                    let err = ExtensionError::Timeout(name.to_string(), "stop".to_string());
                     warn!(
                         "Extension '{}' force-killed after {:?} timeout",
                         name, self.shutdown_timeout
                     );
+                    errors.push(err);
                 }
             }
         }
 
         info!("All extensions stopped");
-        Ok(())
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
