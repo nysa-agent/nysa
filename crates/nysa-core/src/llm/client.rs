@@ -2,31 +2,46 @@ use async_openai::{
     types::*,
     Client as OpenAIClient,
 };
+use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
 
-use crate::config::ChatConfig;
+use crate::config::ai::{AiConfig, ChatOptions, NysaOpenAiConfig, ChatProvider, SummarizationProvider};
 use crate::llm::types::*;
 use crate::llm::tokenizer::estimate_messages_tokens;
 
+pub type ChatStream = Pin<Box<dyn Stream<Item = Result<StreamDelta, LlmError>> + Send>>;
+
+#[derive(Clone)]
 pub struct LlmClient {
     client: OpenAIClient<NysaOpenAiConfig>,
-    config: ChatConfig,
+    chat_options: ChatOptions,
 }
 
 impl LlmClient {
-    pub fn new(config: &ChatConfig) -> Self {
-        let client_config = NysaOpenAiConfig {
-            base_url: config.base_url.clone(),
-            api_key: config.api_key.clone(),
-        };
-
+    pub fn from_config(config: &AiConfig) -> Self {
+        let client_config = config.provider.to_openai_config();
         let client = OpenAIClient::with_config(client_config);
 
         Self {
             client,
-            config: config.clone(),
+            chat_options: config.chat.options.clone(),
         }
+    }
+
+    pub fn from_provider(provider: &crate::config::ai::Provider) -> Self {
+        let client_config = provider.to_openai_config();
+        let client = OpenAIClient::with_config(client_config);
+
+        Self {
+            client,
+            chat_options: ChatOptions::default(),
+        }
+    }
+
+    pub fn with_options(mut self, options: ChatOptions) -> Self {
+        self.chat_options = options;
+        self
     }
 
     pub async fn complete(
@@ -34,7 +49,24 @@ impl LlmClient {
         messages: Vec<ChatCompletionRequestMessage>,
         tools: Option<Vec<ChatCompletionTool>>,
     ) -> Result<LlmResponse, LlmError> {
-        let request = self.build_request(messages, tools)?;
+        self.complete_for_model("default", messages, tools).await
+    }
+
+    pub async fn stream(
+        &self,
+        messages: Vec<ChatCompletionRequestMessage>,
+        tools: Option<Vec<ChatCompletionTool>>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamDelta, LlmError>> + Send>>, LlmError> {
+        self.stream_for_model("default", messages, tools).await
+    }
+
+    pub async fn complete_for_model(
+        &self,
+        model: &str,
+        messages: Vec<ChatCompletionRequestMessage>,
+        tools: Option<Vec<ChatCompletionTool>>,
+    ) -> Result<LlmResponse, LlmError> {
+        let request = self.build_request(model, messages, tools)?;
 
         let response = self
             .client
@@ -45,12 +77,13 @@ impl LlmClient {
         self.parse_response(response)
     }
 
-    pub async fn stream(
+    pub async fn stream_for_model(
         &self,
+        model: &str,
         messages: Vec<ChatCompletionRequestMessage>,
         tools: Option<Vec<ChatCompletionTool>>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamDelta, LlmError>> + Send>>, LlmError> {
-        let request = self.build_request(messages, tools)?;
+        let request = self.build_request(model, messages, tools)?;
         let mut stream_request = request;
         stream_request.stream = Some(true);
 
@@ -92,28 +125,29 @@ impl LlmClient {
 
     fn build_request(
         &self,
+        model: &str,
         messages: Vec<ChatCompletionRequestMessage>,
         tools: Option<Vec<ChatCompletionTool>>,
     ) -> Result<CreateChatCompletionRequest, LlmError> {
         let mut request = CreateChatCompletionRequest {
-            model: self.config.model.clone(),
+            model: model.to_string(),
             messages,
             ..Default::default()
         };
 
-        if let Some(temp) = self.config.options.temperature {
+        if let Some(temp) = self.chat_options.temperature {
             request.temperature = Some(temp);
         }
-        if let Some(top_p) = self.config.options.top_p {
+        if let Some(top_p) = self.chat_options.top_p {
             request.top_p = Some(top_p);
         }
-        if let Some(max_tokens) = self.config.options.max_completion_tokens {
+        if let Some(max_tokens) = self.chat_options.max_completion_tokens {
             request.max_completion_tokens = Some(max_tokens);
         }
-        if let Some(freq_pen) = self.config.options.frequency_penalty {
+        if let Some(freq_pen) = self.chat_options.frequency_penalty {
             request.frequency_penalty = Some(freq_pen);
         }
-        if let Some(pres_pen) = self.config.options.presence_penalty {
+        if let Some(pres_pen) = self.chat_options.presence_penalty {
             request.presence_penalty = Some(pres_pen);
         }
 
@@ -148,65 +182,32 @@ impl LlmClient {
     pub fn estimate_tokens(&self, messages: &[ChatCompletionRequestMessage]) -> usize {
         estimate_messages_tokens(messages)
     }
+}
 
-    pub fn model(&self) -> &str {
-        &self.config.model
+#[async_trait]
+impl ChatProvider for LlmClient {
+    async fn complete(
+        &self,
+        model: &str,
+        messages: Vec<ChatCompletionRequestMessage>,
+    ) -> Result<LlmResponse, LlmError> {
+        self.complete_for_model(model, messages, None).await
     }
 }
 
-#[derive(Clone)]
-pub struct NysaOpenAiConfig {
-    base_url: String,
-    api_key: String,
-}
-
-impl async_openai::config::Config for NysaOpenAiConfig {
-    fn headers(&self) -> reqwest::header::HeaderMap {
-        use reqwest::header::{HeaderMap, AUTHORIZATION, HeaderValue};
-        
-        let mut headers = HeaderMap::new();
-        
-        let auth_value = format!("Bearer {}", self.api_key);
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&auth_value).unwrap_or_else(|_| HeaderValue::from_static("")),
-        );
-
-        headers.insert(
-            "HTTP-Referer",
-            HeaderValue::from_static("https://nysa.phrolova.moe/"),
-        );
-        headers.insert(
-            "X-Title",
-            HeaderValue::from_static("Nysa"),
-        );
-
-        headers
-    }
-
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.base_url, path)
-    }
-
-    fn api_base(&self) -> &str {
-        &self.base_url
-    }
-
-    fn api_key(&self) -> &secrecy::SecretString {
-        use secrecy::SecretString;
-        use std::sync::OnceLock;
-        static SECRET: OnceLock<SecretString> = OnceLock::new();
-        SECRET.get_or_init(|| SecretString::from(self.api_key.clone()))
-    }
-
-    fn query(&self) -> Vec<(&str, &str)> {
-        vec![]
+#[async_trait]
+impl SummarizationProvider for LlmClient {
+    async fn summarize(
+        &self,
+        model: &str,
+        messages: Vec<ChatCompletionRequestMessage>,
+    ) -> Result<String, LlmError> {
+        let response = self.complete_for_model(model, messages, None).await?;
+        Ok(response.content.unwrap_or_default())
     }
 }
 
 pub fn create_user_message(content: impl Into<String>) -> ChatCompletionRequestMessage {
-    use async_openai::types::ChatCompletionRequestUserMessage;
-    
     ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
         content: ChatCompletionRequestUserMessageContent::Text(content.into()),
         ..Default::default()
@@ -214,9 +215,6 @@ pub fn create_user_message(content: impl Into<String>) -> ChatCompletionRequestM
 }
 
 pub fn create_system_message(content: impl Into<String>) -> ChatCompletionRequestMessage {
-    use async_openai::types::ChatCompletionRequestSystemMessage;
-    use async_openai::types::ChatCompletionRequestSystemMessageContent;
-    
     ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
         content: ChatCompletionRequestSystemMessageContent::Text(content.into()),
         ..Default::default()
@@ -227,25 +225,17 @@ pub fn create_assistant_message(
     content: Option<impl Into<String>>,
     tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
 ) -> ChatCompletionRequestMessage {
-    use async_openai::types::ChatCompletionRequestAssistantMessage;
-    use async_openai::types::ChatCompletionRequestAssistantMessageContent;
-    
-    let assistant_message = ChatCompletionRequestAssistantMessage {
+    ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
         content: content.map(|c| ChatCompletionRequestAssistantMessageContent::Text(c.into())),
         tool_calls,
         ..Default::default()
-    };
-    
-    ChatCompletionRequestMessage::Assistant(assistant_message)
+    })
 }
 
 pub fn create_tool_message(
     tool_call_id: impl Into<String>,
     content: impl Into<String>,
 ) -> ChatCompletionRequestMessage {
-    use async_openai::types::ChatCompletionRequestToolMessage;
-    use async_openai::types::ChatCompletionRequestToolMessageContent;
-    
     ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
         tool_call_id: tool_call_id.into(),
         content: ChatCompletionRequestToolMessageContent::Text(content.into()),

@@ -17,12 +17,12 @@ pub mod types;
 // Re-export main types
 pub use client::{
     LlmClient, 
-    NysaOpenAiConfig,
     create_user_message,
     create_system_message, 
     create_assistant_message,
     create_tool_message,
 };
+pub use crate::config::NysaOpenAiConfig;
 pub use conversation::ConversationManager;
 pub use history::MessageHistoryService;
 pub use prompt::{SystemPrompt, load_system_prompt};
