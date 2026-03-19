@@ -1,21 +1,11 @@
 use crate::context::Platform;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PromptCondition {
     pub platform: Option<Platform>,
     pub user_authenticated: bool,
     pub thread_id: Option<uuid::Uuid>,
-}
-
-impl Default for PromptCondition {
-    fn default() -> Self {
-        Self {
-            platform: None,
-            user_authenticated: false,
-            thread_id: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,18 +33,18 @@ impl PromptSection {
 
     pub fn should_include(&self, ctx: &PromptContext) -> bool {
         if let Some(ref cond) = self.condition {
-            if let Some(platform) = &cond.platform {
-                if ctx.platform != *platform {
-                    return false;
-                }
+            if let Some(platform) = &cond.platform
+                && ctx.platform != *platform
+            {
+                return false;
             }
             if ctx.user_authenticated != cond.user_authenticated {
                 return false;
             }
-            if let Some(thread_id) = cond.thread_id {
-                if ctx.thread_id != Some(thread_id) {
-                    return false;
-                }
+            if let Some(thread_id) = cond.thread_id
+                && ctx.thread_id != Some(thread_id)
+            {
+                return false;
             }
         }
         true

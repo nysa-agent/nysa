@@ -1,4 +1,4 @@
-use nysa_core::{ToolHandler, ToolResult, ToolError, async_trait};
+use nysa_core::{ToolError, ToolHandler, ToolResult, async_trait};
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::Mentionable;
 use serde_json::Value;
@@ -18,7 +18,8 @@ impl GetUserProfileTool {
 #[async_trait]
 impl ToolHandler for GetUserProfileTool {
     async fn execute(&self, args: Value) -> Result<ToolResult, ToolError> {
-        let user_id = args.get("user_id")
+        let user_id = args
+            .get("user_id")
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<u64>().ok())
             .ok_or_else(|| ToolError::InvalidArguments("user_id is required".to_string()))?;

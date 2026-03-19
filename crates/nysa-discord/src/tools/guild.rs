@@ -1,4 +1,4 @@
-use nysa_core::{ToolHandler, ToolResult, ToolError, async_trait};
+use nysa_core::{ToolError, ToolHandler, ToolResult, async_trait};
 use poise::serenity_prelude as serenity;
 use serde_json::Value;
 
@@ -18,7 +18,11 @@ impl GuildInfoTool {
 impl ToolHandler for GuildInfoTool {
     async fn execute(&self, args: Value) -> Result<ToolResult, ToolError> {
         // Check if we have a guild_id (for guild info) or channel_id (for channel info)
-        if let Some(guild_id) = args.get("guild_id").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()) {
+        if let Some(guild_id) = args
+            .get("guild_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<u64>().ok())
+        {
             let guild = serenity::GuildId::new(guild_id)
                 .to_partial_guild(&self.ctx.http)
                 .await
@@ -37,7 +41,11 @@ impl ToolHandler for GuildInfoTool {
             });
 
             Ok(ToolResult::success(info.to_string()))
-        } else if let Some(channel_id) = args.get("channel_id").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()) {
+        } else if let Some(channel_id) = args
+            .get("channel_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<u64>().ok())
+        {
             let channel = serenity::ChannelId::new(channel_id)
                 .to_channel(&self.ctx.http)
                 .await
@@ -62,7 +70,9 @@ impl ToolHandler for GuildInfoTool {
 
             Ok(ToolResult::success(info.to_string()))
         } else {
-            Err(ToolError::InvalidArguments("Either guild_id or channel_id is required".to_string()))
+            Err(ToolError::InvalidArguments(
+                "Either guild_id or channel_id is required".to_string(),
+            ))
         }
     }
 }

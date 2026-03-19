@@ -1,15 +1,18 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
     DiscordGuild,
     DiscordDm,
     Minecraft,
+    #[default]
     Cli,
     // Api,
-    Custom { name: String },
+    Custom {
+        name: String,
+    },
 }
 
 impl Platform {
@@ -24,7 +27,7 @@ impl Platform {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "discord_guild" => Platform::DiscordGuild,
             "discord_dm" => Platform::DiscordDm,
@@ -35,12 +38,6 @@ impl Platform {
                 name: other.to_string(),
             },
         }
-    }
-}
-
-impl Default for Platform {
-    fn default() -> Self {
-        Platform::Cli
     }
 }
 

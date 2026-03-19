@@ -1,13 +1,11 @@
 use chrono::{DateTime, Utc};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::database::entities::session::{ActiveModel as SessionActiveModel, Column};
 use crate::database::entities::session::Entity as SessionEntity;
+use crate::database::entities::session::{ActiveModel as SessionActiveModel, Column};
 
 const DEFAULT_SESSION_DURATION_DAYS: i64 = 30;
 
@@ -59,7 +57,9 @@ impl SessionManager {
     pub fn new(db: DatabaseConnection) -> Self {
         Self {
             db,
-            default_duration: Duration::from_secs(DEFAULT_SESSION_DURATION_DAYS as u64 * 24 * 60 * 60),
+            default_duration: Duration::from_secs(
+                DEFAULT_SESSION_DURATION_DAYS as u64 * 24 * 60 * 60,
+            ),
         }
     }
 
@@ -79,8 +79,9 @@ impl SessionManager {
         metadata: serde_json::Value,
     ) -> Result<Session, SessionError> {
         let now = Utc::now();
-        let expires_at = now + chrono::Duration::from_std(self.default_duration)
-            .unwrap_or(chrono::Duration::days(DEFAULT_SESSION_DURATION_DAYS));
+        let expires_at = now
+            + chrono::Duration::from_std(self.default_duration)
+                .unwrap_or(chrono::Duration::days(DEFAULT_SESSION_DURATION_DAYS));
 
         let session = SessionActiveModel {
             id: Set(Uuid::new_v4()),
@@ -118,7 +119,7 @@ impl SessionManager {
         platform_session_id: &str,
     ) -> Result<Session, SessionError> {
         let now = Utc::now().naive_utc();
-        
+
         let session = SessionEntity::find()
             .filter(Column::Platform.eq(platform))
             .filter(Column::PlatformSessionId.eq(platform_session_id))
@@ -133,7 +134,7 @@ impl SessionManager {
     /// Get all active sessions for a user
     pub async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<Session>, SessionError> {
         let now = Utc::now().naive_utc();
-        
+
         let sessions = SessionEntity::find()
             .filter(Column::UserId.eq(user_id))
             .filter(Column::ExpiresAt.gt(now))
@@ -155,8 +156,9 @@ impl SessionManager {
             return Err(SessionError::Expired);
         }
 
-        let new_expires_at = Utc::now() + chrono::Duration::from_std(self.default_duration)
-            .unwrap_or(chrono::Duration::days(DEFAULT_SESSION_DURATION_DAYS));
+        let new_expires_at = Utc::now()
+            + chrono::Duration::from_std(self.default_duration)
+                .unwrap_or(chrono::Duration::days(DEFAULT_SESSION_DURATION_DAYS));
 
         let mut active_model: SessionActiveModel = session.into();
         active_model.expires_at = Set(new_expires_at.naive_utc());
@@ -206,7 +208,7 @@ impl SessionManager {
     /// Clean up expired sessions
     pub async fn cleanup_expired(&self) -> Result<u64, SessionError> {
         let now = Utc::now().naive_utc();
-        
+
         let result = SessionEntity::delete_many()
             .filter(Column::ExpiresAt.lt(now))
             .exec(&self.db)
@@ -218,7 +220,5 @@ impl SessionManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Tests would require a test database
 }

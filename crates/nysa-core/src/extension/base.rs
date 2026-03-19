@@ -12,8 +12,9 @@ use crate::tool::ToolRegistry;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum RestartPolicy {
+    #[default]
     Never,
     Immediately {
         max_restarts: u32,
@@ -24,12 +25,6 @@ pub enum RestartPolicy {
         factor: u32,
         max_restarts: u32,
     },
-}
-
-impl Default for RestartPolicy {
-    fn default() -> Self {
-        RestartPolicy::Never
-    }
 }
 
 impl RestartPolicy {
@@ -89,25 +84,33 @@ pub enum ExtensionError {
 impl Clone for ExtensionError {
     fn clone(&self) -> Self {
         match self {
-            ExtensionError::StartFailed { name, reason, source } => ExtensionError::StartFailed {
+            ExtensionError::StartFailed {
+                name,
+                reason,
+                source,
+            } => ExtensionError::StartFailed {
                 name: name.clone(),
                 reason: reason.clone(),
-                source: source.as_ref().map(|s| Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    s.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>),
+                source: source.as_ref().map(|s| {
+                    Box::new(std::io::Error::other(s.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                }),
             },
-            ExtensionError::StopFailed { name, reason, source } => ExtensionError::StopFailed {
+            ExtensionError::StopFailed {
+                name,
+                reason,
+                source,
+            } => ExtensionError::StopFailed {
                 name: name.clone(),
                 reason: reason.clone(),
-                source: source.as_ref().map(|s| Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    s.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>),
+                source: source.as_ref().map(|s| {
+                    Box::new(std::io::Error::other(s.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                }),
             },
             ExtensionError::Timeout(a, b) => ExtensionError::Timeout(a.clone(), b.clone()),
             ExtensionError::NotFound(a) => ExtensionError::NotFound(a.clone()),
-            ExtensionError::Io(e) => ExtensionError::Io(std::io::Error::new(e.kind(), e.to_string())),
+            ExtensionError::Io(e) => {
+                ExtensionError::Io(std::io::Error::new(e.kind(), e.to_string()))
+            }
             ExtensionError::Custom(s) => ExtensionError::Custom(s.clone()),
         }
     }
@@ -122,7 +125,9 @@ impl fmt::Display for ExtensionError {
             ExtensionError::StopFailed { name, reason, .. } => {
                 write!(f, "Extension '{}' failed to stop: {}", name, reason)
             }
-            ExtensionError::Timeout(name, op) => write!(f, "Extension '{}' timed out during {}", name, op),
+            ExtensionError::Timeout(name, op) => {
+                write!(f, "Extension '{}' timed out during {}", name, op)
+            }
             ExtensionError::NotFound(name) => write!(f, "Extension not found: {}", name),
             ExtensionError::Io(e) => write!(f, "IO error: {}", e),
             ExtensionError::Custom(s) => write!(f, "{}", s),
@@ -239,7 +244,10 @@ pub trait Extension: Send + Sync + 'static {
         Ok(())
     }
 
-    fn background_task(&self, _ctx: &crate::extension::context::ExtensionContext) -> Option<BackgroundTask> {
+    fn background_task(
+        &self,
+        _ctx: &crate::extension::context::ExtensionContext,
+    ) -> Option<BackgroundTask> {
         None
     }
 
@@ -285,12 +293,12 @@ impl ExtensionDescription {
 
 pub trait ExtensionDef: Send + Sync + 'static + Sized {
     type Config: DeserializeOwned + Send + Sync + 'static;
-    
+
     fn extension_name() -> &'static str;
-    
+
     fn extension_description() -> Option<&'static str> {
         None
     }
-    
+
     fn create(config: Self::Config) -> Self;
 }

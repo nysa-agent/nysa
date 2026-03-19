@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::models::{ChannelMode, DmMode, DiscordConfig, ProactiveState, ThreadState};
+use crate::models::{ChannelMode, DiscordConfig, DmMode, ProactiveState, ThreadState};
 
 pub struct DiscordMessageHandler {
     config: DiscordConfig,
@@ -15,10 +15,13 @@ pub struct DiscordMessageHandler {
 
 impl DiscordMessageHandler {
     pub fn new(config: DiscordConfig) -> Self {
-        let active_threads: Arc<RwLock<HashMap<Uuid, ThreadState>>> = Arc::new(RwLock::new(HashMap::new()));
+        let active_threads: Arc<RwLock<HashMap<Uuid, ThreadState>>> =
+            Arc::new(RwLock::new(HashMap::new()));
         let dm_threads: Arc<RwLock<HashMap<u64, Uuid>>> = Arc::new(RwLock::new(HashMap::new()));
-        let proactive_states: Arc<RwLock<HashMap<u64, ProactiveState>>> = Arc::new(RwLock::new(HashMap::new()));
-        let channel_modes: Arc<RwLock<HashMap<u64, ChannelMode>>> = Arc::new(RwLock::new(HashMap::new()));
+        let proactive_states: Arc<RwLock<HashMap<u64, ProactiveState>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        let channel_modes: Arc<RwLock<HashMap<u64, ChannelMode>>> =
+            Arc::new(RwLock::new(HashMap::new()));
 
         Self {
             config,
@@ -73,24 +76,21 @@ impl DiscordMessageHandler {
     /// Check if we should respond proactively to this user
     pub async fn should_respond_proactively(&self, user_id: u64) -> bool {
         let states = self.proactive_states.read().await;
-        
+
         if let Some(state) = states.get(&user_id) {
             // Check if enough time has passed
             state.should_send()
         } else {
             // No proactive state yet - check if we should start
             // Only in active mode or proactive DM mode
-            match self.config.dm_mode {
-                DmMode::Proactive => true,
-                _ => false,
-            }
+            matches!(self.config.dm_mode, DmMode::Proactive)
         }
     }
 
     /// Update proactive state for a user
     pub async fn update_proactive_state(&self, user_id: u64, user_uuid: Uuid) {
         let mut states = self.proactive_states.write().await;
-        
+
         if let Some(state) = states.get_mut(&user_id) {
             state.last_message_at = chrono::Utc::now();
         } else {
@@ -106,7 +106,7 @@ impl DiscordMessageHandler {
     /// Register a message for proactive tracking
     pub async fn register_proactive_message(&self, user_id: u64, user_uuid: Uuid) {
         let mut states = self.proactive_states.write().await;
-        
+
         let state = ProactiveState::new(
             user_uuid,
             self.config.proactive_min,
@@ -141,10 +141,10 @@ impl DiscordMessageHandler {
         // Check if there's already an active thread in this channel for this user
         let threads = self.active_threads.read().await;
         for thread in threads.values() {
-            if thread.discord_channel_id == discord_channel_id && thread.user_id == user_uuid {
-                if thread.is_active {
-                    return thread.clone();
-                }
+            if thread.discord_channel_id == discord_channel_id && thread.user_id == user_uuid
+                && thread.is_active
+            {
+                return thread.clone();
             }
         }
         drop(threads);
@@ -153,7 +153,7 @@ impl DiscordMessageHandler {
         let thread = ThreadState::new(discord_channel_id, user_uuid);
         let mut threads = self.active_threads.write().await;
         threads.insert(thread.id, thread.clone());
-        
+
         thread
     }
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
@@ -150,10 +150,7 @@ impl TaskSupervisor {
             RestartPolicy::Never => None,
             RestartPolicy::Immediately { .. } => Some(Duration::ZERO),
             RestartPolicy::WithBackoff {
-                min,
-                max,
-                factor,
-                ..
+                min, max, factor, ..
             } => {
                 let delay = min.saturating_mul(factor.pow(attempt)).min(*max);
                 if delay.is_zero() {
@@ -232,9 +229,7 @@ impl ExtensionManager {
     }
 
     pub fn get_by_name(&self, name: &str) -> Option<&dyn Extension> {
-        self.extensions
-            .get(name)
-            .map(|e| e.as_ref())
+        self.extensions.get(name).map(|e| e.as_ref())
     }
 
     pub fn all(&self) -> Vec<&dyn Extension> {

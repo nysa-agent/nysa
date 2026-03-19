@@ -13,7 +13,9 @@ use tracing_subscriber::{
 use crate::auth::AuthService;
 use crate::compaction::{CompactionManager, CompactionService};
 use crate::config::{AiConfig, Config};
-use crate::extension::{EventBus, Extension, ExtensionContext, ExtensionFactoryRegistry, ExtensionManager};
+use crate::extension::{
+    EventBus, Extension, ExtensionContext, ExtensionFactoryRegistry, ExtensionManager,
+};
 use crate::llm::{ConversationManager, LlmClient, LlmConfig, MessageHistoryService};
 use crate::tool::{ToolDefinition, ToolExecutor, ToolHandler, ToolRegistry};
 
@@ -148,15 +150,11 @@ impl AppBuilder {
         self
     }
 
-    pub fn extension_from_config(
-        mut self,
-        name: &str,
-        config: serde_json::Value,
-    ) -> Self {
-        if let Some(ref factory) = self.factory_registry {
-            if let Some(ext) = factory.create(name, config) {
-                self.extensions.register_boxed(ext);
-            }
+    pub fn extension_from_config(mut self, name: &str, config: serde_json::Value) -> Self {
+        if let Some(ref factory) = self.factory_registry
+            && let Some(ext) = factory.create(name, config)
+        {
+            self.extensions.register_boxed(ext);
         }
         self
     }

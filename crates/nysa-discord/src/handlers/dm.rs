@@ -1,8 +1,8 @@
+use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
 
 use crate::models::DmMode;
 
@@ -32,7 +32,8 @@ impl Clone for DmHandler {
 
 impl DmHandler {
     pub fn new(mode: DmMode) -> Self {
-        let active_dm_threads: Arc<RwLock<HashMap<u64, DmThreadState>>> = Arc::new(RwLock::new(HashMap::new()));
+        let active_dm_threads: Arc<RwLock<HashMap<u64, DmThreadState>>> =
+            Arc::new(RwLock::new(HashMap::new()));
         let threads_clone = Arc::clone(&active_dm_threads);
 
         // Start cleanup task for inactive DM threads
@@ -40,14 +41,18 @@ impl DmHandler {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
-                
+
                 let now = Utc::now();
                 let timeout = Duration::minutes(DM_THREAD_TIMEOUT_MINUTES);
-                
+
                 let mut threads = threads_clone.write().await;
                 threads.retain(|_, state| {
                     if now.signed_duration_since(state.last_activity) > timeout {
-                        tracing::info!("DM thread {} timed out after {} minutes", state.thread_id, DM_THREAD_TIMEOUT_MINUTES);
+                        tracing::info!(
+                            "DM thread {} timed out after {} minutes",
+                            state.thread_id,
+                            DM_THREAD_TIMEOUT_MINUTES
+                        );
                         false
                     } else {
                         true
@@ -65,7 +70,7 @@ impl DmHandler {
     /// Get or create a DM thread for a user
     pub async fn get_or_create_thread(&self, user_id: u64, user_uuid: Uuid) -> DmThreadState {
         let mut threads = self.active_dm_threads.write().await;
-        
+
         if let Some(state) = threads.get(&user_id) {
             let mut state = state.clone();
             state.last_activity = Utc::now();
@@ -82,15 +87,20 @@ impl DmHandler {
         };
 
         threads.insert(user_id, state.clone());
-        tracing::info!("Created new DM thread {} for user {} (uuid: {})", thread_id, user_id, user_uuid);
-        
+        tracing::info!(
+            "Created new DM thread {} for user {} (uuid: {})",
+            thread_id,
+            user_id,
+            user_uuid
+        );
+
         state
     }
 
     /// Revive an old DM thread if it exists but is inactive
     pub async fn revive_thread(&self, user_id: u64) -> Option<DmThreadState> {
         let mut threads = self.active_dm_threads.write().await;
-        
+
         if let Some(mut state) = threads.get(&user_id).cloned() {
             state.is_active = true;
             state.last_activity = Utc::now();

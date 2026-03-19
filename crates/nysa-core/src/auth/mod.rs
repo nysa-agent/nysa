@@ -1,11 +1,14 @@
-pub mod token;
-pub mod provider;
 pub mod linking;
-pub mod session;
+pub mod provider;
 pub mod rate_limit;
+pub mod session;
+pub mod token;
 
-pub use token::{Token, generate_token, hash_token, verify_token, compute_lookup_hash, TokenError, generate_linking_code, hash_linking_code, verify_linking_code};
-pub use provider::{AuthService, AuthProvider, AuthError, PlatformProfile};
-pub use linking::{LinkingCodeService, LinkingCodeError};
-pub use session::{SessionManager, Session, SessionError};
-pub use rate_limit::{RateLimiter, RateLimitResult};
+pub use linking::{LinkingCodeError, LinkingCodeService};
+pub use provider::{AuthError, AuthProvider, AuthService, PlatformProfile};
+pub use rate_limit::{RateLimitResult, RateLimiter};
+pub use session::{Session, SessionError, SessionManager};
+pub use token::{
+    Token, TokenError, compute_lookup_hash, generate_linking_code, generate_token,
+    hash_linking_code, hash_token, verify_linking_code, verify_token,
+};

@@ -90,10 +90,10 @@ impl EventBus {
         let type_id = TypeId::of::<E>();
 
         let channels = self.inner.channels.read();
-        if let Some(sender) = channels.get(&type_id) {
-            if let Some(tx) = sender.downcast_ref::<broadcast::Sender<E>>() {
-                let _ = tx.send(event);
-            }
+        if let Some(sender) = channels.get(&type_id)
+            && let Some(tx) = sender.downcast_ref::<broadcast::Sender<E>>()
+        {
+            let _ = tx.send(event);
         }
     }
 
@@ -102,10 +102,10 @@ impl EventBus {
 
         {
             let channels = self.inner.channels.read();
-            if let Some(sender) = channels.get(&type_id) {
-                if let Some(tx) = sender.downcast_ref::<broadcast::Sender<E>>() {
-                    return tx.subscribe();
-                }
+            if let Some(sender) = channels.get(&type_id)
+                && let Some(tx) = sender.downcast_ref::<broadcast::Sender<E>>()
+            {
+                return tx.subscribe();
             }
         }
 

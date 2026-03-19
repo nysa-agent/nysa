@@ -1,7 +1,7 @@
+use chrono::Utc;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::Utc;
 
 /// Handler for "Evaluate All" mode
 /// In this mode, every message is evaluated by the LLM to determine
@@ -45,7 +45,8 @@ pub struct ResponseCriteria {
 
 impl EvaluateAllHandler {
     pub fn new() -> Self {
-        let recent_messages: Arc<RwLock<HashMap<u64, VecDeque<RecentMessage>>>> = Arc::new(RwLock::new(HashMap::new()));
+        let recent_messages: Arc<RwLock<HashMap<u64, VecDeque<RecentMessage>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
         let messages_clone = Arc::clone(&recent_messages);
 
         // Cleanup old messages periodically
@@ -53,14 +54,14 @@ impl EvaluateAllHandler {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300)); // 5 minutes
             loop {
                 interval.tick().await;
-                
+
                 let cutoff = Utc::now() - chrono::Duration::hours(1);
                 let mut messages = messages_clone.write().await;
-                
+
                 for (_, msgs) in messages.iter_mut() {
                     msgs.retain(|m| m.timestamp > cutoff);
                 }
-                
+
                 messages.retain(|_, msgs| !msgs.is_empty());
             }
         });
@@ -72,15 +73,10 @@ impl EvaluateAllHandler {
     }
 
     /// Record a message for context evaluation
-    pub async fn record_message(
-        &self,
-        channel_id: u64,
-        content: String,
-        author_id: u64,
-    ) {
+    pub async fn record_message(&self, channel_id: u64, content: String, author_id: u64) {
         let mut messages = self.recent_messages.write().await;
         let entry = messages.entry(channel_id).or_default();
-        
+
         entry.push_back(RecentMessage {
             content,
             author_id,
@@ -97,10 +93,10 @@ impl EvaluateAllHandler {
     /// Mark that we responded to a message in this channel
     pub async fn mark_responded(&self, channel_id: u64) {
         let mut messages = self.recent_messages.write().await;
-        if let Some(msgs) = messages.get_mut(&channel_id) {
-            if let Some(last) = msgs.back_mut() {
-                last.responded = true;
-            }
+        if let Some(msgs) = messages.get_mut(&channel_id)
+            && let Some(last) = msgs.back_mut()
+        {
+            last.responded = true;
         }
     }
 
@@ -113,7 +109,7 @@ impl EvaluateAllHandler {
         let criteria = self.analyze_criteria(content, author_id, channel_history);
 
         // Calculate response score
-        let mut score = 0.0;
+        let mut score: f64 = 0.0;
 
         if criteria.is_addressed {
             score += 0.4;
@@ -144,11 +140,17 @@ impl EvaluateAllHandler {
             }
         }
 
-        (score as f64).min(1.0)
+        score.min(1.0)
     }
 
     /// Should we respond based on the score?
-    pub async fn should_respond(&self, channel_id: u64, content: &str, author_id: u64, threshold: f64) -> bool {
+    pub async fn should_respond(
+        &self,
+        channel_id: u64,
+        content: &str,
+        author_id: u64,
+        threshold: f64,
+    ) -> bool {
         let score = self.evaluate(channel_id, content, author_id).await;
         score >= threshold
     }
@@ -160,48 +162,49 @@ impl EvaluateAllHandler {
         channel_history: Option<&VecDeque<RecentMessage>>,
     ) -> ResponseCriteria {
         let content_lower = content.to_lowercase();
-        
+
         // Check for direct mention patterns
-        let is_addressed = content_lower.contains("nysa") 
+        let is_addressed = content_lower.contains("nysa")
             || content_lower.contains("@nysa")
             || content_lower.starts_with("hey ")
             || content_lower.starts_with("hi ")
             || content_lower.starts_with("hello ");
 
         // Check for questions
-        let has_question = content.contains('?') || 
-            content_lower.contains("how") ||
-            content_lower.contains("what") ||
-            content_lower.contains("why") ||
-            content_lower.contains("when") ||
-            content_lower.contains("where") ||
-            content_lower.contains("who") ||
-            content_lower.contains("can you") ||
-            content_lower.contains("could you");
+        let has_question = content.contains('?')
+            || content_lower.contains("how")
+            || content_lower.contains("what")
+            || content_lower.contains("why")
+            || content_lower.contains("when")
+            || content_lower.contains("where")
+            || content_lower.contains("who")
+            || content_lower.contains("can you")
+            || content_lower.contains("could you");
 
         // Check for assistance keywords
-        let needs_assistance = content_lower.contains("help") ||
-            content_lower.contains("assist") ||
-            content_lower.contains("support") ||
-            content_lower.contains("stuck") ||
-            content_lower.contains("problem") ||
-            content_lower.contains("issue") ||
-            content_lower.contains("error");
+        let needs_assistance = content_lower.contains("help")
+            || content_lower.contains("assist")
+            || content_lower.contains("support")
+            || content_lower.contains("stuck")
+            || content_lower.contains("problem")
+            || content_lower.contains("issue")
+            || content_lower.contains("error");
 
         // Analyze context
         let (is_contextual, user_engaged) = if let Some(history) = channel_history {
             // Check if this continues a conversation
-            let recent_user_msgs: Vec<_> = history.iter()
+            let recent_user_msgs: Vec<_> = history
+                .iter()
                 .rev()
                 .take(5)
                 .filter(|m| m.author_id == author_id)
                 .collect();
-            
+
             let user_engaged = recent_user_msgs.len() >= 3;
-            
+
             // Contextual if we've been talking recently
             let is_contextual = history.iter().rev().take(3).any(|m| m.responded);
-            
+
             (is_contextual, user_engaged)
         } else {
             (false, false)

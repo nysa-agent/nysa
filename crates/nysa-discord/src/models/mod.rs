@@ -5,19 +5,14 @@ use uuid::Uuid;
 pub mod linking_code;
 pub mod user;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ChannelMode {
     Disabled,
     EvaluateAll,
+    #[default]
     Thread,
     Active,
-}
-
-impl Default for ChannelMode {
-    fn default() -> Self {
-        ChannelMode::Thread
-    }
 }
 
 impl std::fmt::Display for ChannelMode {
@@ -31,17 +26,12 @@ impl std::fmt::Display for ChannelMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DmMode {
+    #[default]
     Reactive,
     Proactive,
-}
-
-impl Default for DmMode {
-    fn default() -> Self {
-        DmMode::Reactive
-    }
 }
 
 impl std::fmt::Display for DmMode {

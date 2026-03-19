@@ -24,7 +24,8 @@ impl VoiceManager {
                 \n- whisper-cpp for speech-to-text\
                 \n- Symphonia for audio decoding\
                 \n- Rubato for audio resampling\
-                \n- Hound for WAV encoding".to_string(),
+                \n- Hound for WAV encoding"
+                .to_string(),
         })
     }
 
@@ -41,7 +42,10 @@ impl VoiceManager {
 
     pub async fn list_active(&self) -> Vec<(u64, u64)> {
         let connections = self.active_connections.read().await;
-        connections.iter().map(|c| (c.guild_id, c.channel_id)).collect()
+        connections
+            .iter()
+            .map(|c| (c.guild_id, c.channel_id))
+            .collect()
     }
 }
 
@@ -62,7 +66,9 @@ pub enum VoiceError {
 impl std::fmt::Display for VoiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VoiceError::NotImplemented { message } => write!(f, "Voice not implemented: {}", message),
+            VoiceError::NotImplemented { message } => {
+                write!(f, "Voice not implemented: {}", message)
+            }
             VoiceError::AlreadyConnected => write!(f, "Already in a voice channel"),
             VoiceError::NotConnected => write!(f, "Not in a voice channel"),
             VoiceError::ConnectionFailed(e) => write!(f, "Failed to connect: {}", e),

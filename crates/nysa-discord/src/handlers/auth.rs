@@ -1,5 +1,5 @@
-use nysa_core::{AuthService, AuthError};
 use nysa_core::auth::Session;
+use nysa_core::{AuthError, AuthService};
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -50,14 +50,18 @@ impl AuthMiddleware {
 
     /// Check if a Discord user is authenticated
     /// Returns the authenticated user info if found
-    pub async fn authenticate(&self, discord_id: u64, username: String) -> Option<AuthenticatedUser> {
+    pub async fn authenticate(
+        &self,
+        discord_id: u64,
+        username: String,
+    ) -> Option<AuthenticatedUser> {
         // Check cache first
         {
             let cache = self.cache.read().await;
-            if let Some((user, timestamp)) = cache.get(&discord_id) {
-                if std::time::Instant::now().duration_since(*timestamp) < self.cache_ttl {
-                    return Some(user.clone());
-                }
+            if let Some((user, timestamp)) = cache.get(&discord_id)
+                && std::time::Instant::now().duration_since(*timestamp) < self.cache_ttl
+            {
+                return Some(user.clone());
             }
         }
 
@@ -71,28 +75,34 @@ impl AuthMiddleware {
         };
 
         let user = users.into_iter().find(|u| {
-            if let Some(profiles) = u.linked_profiles.as_object() {
-                if let Some(discord) = profiles.get("discord") {
-                    if let Some(id) = discord.get("id") {
-                        if let Some(id_str) = id.as_str() {
-                            return id_str == discord_id.to_string();
-                        }
-                    }
-                }
+            if let Some(profiles) = u.linked_profiles.as_object()
+                && let Some(discord) = profiles.get("discord")
+                && let Some(id) = discord.get("id")
+                && let Some(id_str) = id.as_str()
+            {
+                return id_str == discord_id.to_string();
             }
             false
         });
 
         if let Some(user) = user {
             // Try to find or create session
-            let session = match self.auth_service.validate_platform_session("discord", &discord_id.to_string()).await {
+            let session = match self
+                .auth_service
+                .validate_platform_session("discord", &discord_id.to_string())
+                .await
+            {
                 Ok(s) => Some(s),
                 Err(_) => {
                     // Create new session
                     let metadata = serde_json::json!({
                         "username": username,
                     });
-                    match self.auth_service.create_session(user.id, "discord", &discord_id.to_string(), metadata).await {
+                    match self
+                        .auth_service
+                        .create_session(user.id, "discord", &discord_id.to_string(), metadata)
+                        .await
+                    {
                         Ok(s) => Some(s),
                         Err(e) => {
                             tracing::error!("Failed to create session: {}", e);
@@ -120,8 +130,13 @@ impl AuthMiddleware {
     }
 
     /// Require authentication - returns error if not authenticated
-    pub async fn require_auth(&self, discord_id: u64, username: String) -> Result<AuthenticatedUser, AuthError> {
-        self.authenticate(discord_id, username).await
+    pub async fn require_auth(
+        &self,
+        discord_id: u64,
+        username: String,
+    ) -> Result<AuthenticatedUser, AuthError> {
+        self.authenticate(discord_id, username)
+            .await
             .ok_or(AuthError::InvalidToken)
     }
 

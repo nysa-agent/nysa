@@ -17,14 +17,12 @@ async fn check_existing_user(
     let users = UserEntity::find().all(db).await?;
 
     Ok(users.into_iter().find(|u| {
-        if let Some(profiles) = u.linked_profiles.as_object() {
-            if let Some(discord) = profiles.get("discord") {
-                if let Some(id) = discord.get("id") {
-                    if let Some(id_str) = id.as_str() {
-                        return id_str == discord_id.to_string();
-                    }
-                }
-            }
+        if let Some(profiles) = u.linked_profiles.as_object()
+            && let Some(discord) = profiles.get("discord")
+            && let Some(id) = discord.get("id")
+            && let Some(id_str) = id.as_str()
+        {
+            return id_str == discord_id.to_string();
         }
         false
     }))
@@ -128,9 +126,7 @@ pub async fn auth(
 
                             let embed = serenity::CreateEmbed::new()
                                 .title("Account Linked!")
-                                .description(format!(
-                                    "Your Discord account has been linked to your existing Nysa account.\n\n**Linked Platforms:** discord, and any others you had before.\n\nWelcome back!"
-                                ))
+                                .description("Your Discord account has been linked to your existing Nysa account.\n\n**Linked Platforms:** discord, and any others you had before.\n\nWelcome back!")
                                 .color(0x4ADE80);
 
                             ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
@@ -209,9 +205,7 @@ pub async fn auth(
 
                     let embed = serenity::CreateEmbed::new()
                         .title("Account Linked!")
-                        .description(format!(
-                            "Your Discord account has been linked using the linking code.\n\nYou can now use Nysa across all your linked platforms!"
-                        ))
+                        .description("Your Discord account has been linked using the linking code.\n\nYou can now use Nysa across all your linked platforms!")
                         .color(0x4ADE80);
 
                     ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))

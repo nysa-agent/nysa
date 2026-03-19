@@ -1,11 +1,16 @@
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder,
+    Set,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::config::ai::{AiConfig, CompactionConfig, SummarizationProvider};
-use crate::database::entities::message::{ActiveModel as MessageActiveModel, Column, Entity as MessageEntity};
-use crate::llm::client::{create_system_message, create_user_message, LlmClient};
+use crate::database::entities::message::{
+    ActiveModel as MessageActiveModel, Column, Entity as MessageEntity,
+};
+use crate::llm::client::{LlmClient, create_system_message, create_user_message};
 use crate::llm::types::LlmError;
 
 #[derive(Debug, Error)]
@@ -102,8 +107,11 @@ impl CompactionService {
         let preserve_count = self.config.preserve_recent;
 
         if original_count <= preserve_count {
-            tracing::debug!("Thread {} has fewer messages than preserve_recent ({})", 
-                thread_id, preserve_count);
+            tracing::debug!(
+                "Thread {} has fewer messages than preserve_recent ({})",
+                thread_id,
+                preserve_count
+            );
             return Err(CompactionError::NoMessages);
         }
 
@@ -113,11 +121,7 @@ impl CompactionService {
             return Err(CompactionError::NoMessages);
         }
 
-        let messages_for_summary: Vec<_> = messages
-            .iter()
-            .take(to_compact)
-            .cloned()
-            .collect();
+        let messages_for_summary: Vec<_> = messages.iter().take(to_compact).cloned().collect();
 
         let summary = self.generate_summary(&messages_for_summary).await?;
 
@@ -133,10 +137,7 @@ impl CompactionService {
             author_internal_id: Set(None),
             author_platform_id: Set(None),
             author_name: Set("System".to_string()),
-            content: Set(format!(
-                "[Compacted History Summary]\n\n{}",
-                summary
-            )),
+            content: Set(format!("[Compacted History Summary]\n\n{}", summary)),
             role: Set("assistant".to_string()),
             created_at: Set(chrono::Utc::now().naive_utc()),
         };
@@ -161,7 +162,9 @@ impl CompactionService {
         &self,
         messages: &[crate::database::entities::message::Model],
     ) -> Result<String, CompactionError> {
-        let llm_client = self.llm_client.as_ref()
+        let llm_client = self
+            .llm_client
+            .as_ref()
             .ok_or(CompactionError::LlmNotConfigured)?;
 
         let conversation_text = messages
@@ -176,11 +179,15 @@ impl CompactionService {
         );
 
         let request_messages = vec![
-            create_system_message("You are a helpful assistant that summarizes conversations concisely."),
+            create_system_message(
+                "You are a helpful assistant that summarizes conversations concisely.",
+            ),
             create_user_message(&summary_prompt),
         ];
 
-        let response = llm_client.summarize(&self.compaction_model, request_messages).await?;
+        let response = llm_client
+            .summarize(&self.compaction_model, request_messages)
+            .await?;
 
         Ok(response)
     }

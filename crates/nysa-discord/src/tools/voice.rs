@@ -1,4 +1,6 @@
-use nysa_core::{ToolDefinition, ToolHandler, ToolResult, ToolError, PropertyType, SchemaBuilder, async_trait};
+use nysa_core::{
+    PropertyType, SchemaBuilder, ToolDefinition, ToolError, ToolHandler, ToolResult, async_trait,
+};
 
 pub struct VoiceChannelTool;
 
@@ -8,10 +10,17 @@ impl VoiceChannelTool {
     }
 }
 
+impl Default for VoiceChannelTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl ToolHandler for VoiceChannelTool {
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult, ToolError> {
-        let action = args.get("action")
+        let action = args
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArguments("action is required".to_string()))?;
 
@@ -31,16 +40,23 @@ impl ToolHandler for VoiceChannelTool {
     }
 }
 
+#[allow(dead_code)]
 pub fn register(registry: &mut nysa_core::ToolRegistry) {
     let tool = ToolDefinition::builder()
         .name("voice_channel")
         .description("Manage voice channels - JOIN or LEAVE (PLACEHOLDER - not yet implemented)")
         .parameters(
             SchemaBuilder::object()
-                .property("action", PropertyType::string()
-                    .description("Action: join_voice or leave_voice")
-                    .enum_values(vec!["join_voice", "leave_voice"]))
-                .property("channel_id", PropertyType::string().description("Voice channel ID (for join_voice)"))
+                .property(
+                    "action",
+                    PropertyType::string()
+                        .description("Action: join_voice or leave_voice")
+                        .enum_values(vec!["join_voice", "leave_voice"]),
+                )
+                .property(
+                    "channel_id",
+                    PropertyType::string().description("Voice channel ID (for join_voice)"),
+                )
                 .required("action")
                 .build(),
         )

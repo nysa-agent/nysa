@@ -93,7 +93,9 @@ impl ThreadManager {
                 // Find expired threads
                 let expired: Vec<u64> = threads
                     .iter()
-                    .filter(|(_, state)| now.signed_duration_since(state.last_message_at) > thread_timeout)
+                    .filter(|(_, state)| {
+                        now.signed_duration_since(state.last_message_at) > thread_timeout
+                    })
                     .map(|(id, _)| *id)
                     .collect();
 
@@ -111,7 +113,9 @@ impl ThreadManager {
                 // Clean up stale processing locks (not accessed in 1 hour)
                 let lock_timeout = Duration::hours(1);
                 let mut locks = locks_clone.write().await;
-                locks.retain(|_, lock| now.signed_duration_since(lock.last_accessed) <= lock_timeout);
+                locks.retain(|_, lock| {
+                    now.signed_duration_since(lock.last_accessed) <= lock_timeout
+                });
             }
         });
 

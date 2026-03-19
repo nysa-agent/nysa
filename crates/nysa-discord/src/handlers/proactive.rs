@@ -1,8 +1,8 @@
+use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use chrono::Utc;
 
 use crate::models::ProactiveState;
 
@@ -24,7 +24,8 @@ impl Clone for ProactiveManager {
 
 impl ProactiveManager {
     pub fn new(min_seconds: i64, max_seconds: i64) -> Self {
-        let states: Arc<RwLock<HashMap<u64, ProactiveState>>> = Arc::new(RwLock::new(HashMap::new()));
+        let states: Arc<RwLock<HashMap<u64, ProactiveState>>> =
+            Arc::new(RwLock::new(HashMap::new()));
         let states_clone = Arc::clone(&states);
 
         // Start cleanup task for old proactive states
@@ -32,10 +33,10 @@ impl ProactiveManager {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300)); // 5 minutes
             loop {
                 interval.tick().await;
-                
+
                 let cutoff = Utc::now() - chrono::Duration::hours(24);
                 let mut states = states_clone.write().await;
-                
+
                 states.retain(|_, state| state.last_message_at > cutoff);
             }
         });
@@ -57,7 +58,7 @@ impl ProactiveManager {
     /// Record a message from a user (resets the timer)
     pub async fn record_message(&self, discord_user_id: u64) {
         let mut states = self.states.write().await;
-        
+
         if let Some(state) = states.get_mut(&discord_user_id) {
             state.record_message();
         }
@@ -66,7 +67,7 @@ impl ProactiveManager {
     /// Check if we should send a proactive message to this user
     pub async fn should_send_message(&self, discord_user_id: u64) -> bool {
         let states = self.states.read().await;
-        
+
         if let Some(state) = states.get(&discord_user_id) {
             state.should_send()
         } else {
@@ -95,7 +96,7 @@ impl ProactiveManager {
     /// Update proactive intervals for a user
     pub async fn update_intervals(&self, discord_user_id: u64, min_seconds: i64, max_seconds: i64) {
         let mut states = self.states.write().await;
-        
+
         if let Some(state) = states.get_mut(&discord_user_id) {
             state.min_interval_seconds = min_seconds;
             state.max_interval_seconds = max_seconds;

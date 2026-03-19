@@ -1,20 +1,20 @@
-use nysa_core::{ToolRegistry, ToolDefinition, ToolHandler};
 use nysa_core::{PropertyType, SchemaBuilder};
+use nysa_core::{ToolDefinition, ToolHandler, ToolRegistry};
 use poise::serenity_prelude as serenity;
 use std::sync::Arc;
 
-mod reaction;
-mod profile;
 mod channel;
-mod history;
 mod guild;
+mod history;
+mod profile;
+mod reaction;
 mod voice;
 
-pub use reaction::MessageReactionTool;
-pub use profile::GetUserProfileTool;
 pub use channel::ChannelManagementTool;
-pub use history::MessageHistoryTool;
 pub use guild::GuildInfoTool;
+pub use history::MessageHistoryTool;
+pub use profile::GetUserProfileTool;
+pub use reaction::MessageReactionTool;
 pub use voice::VoiceChannelTool;
 
 /// Context passed to Discord tools
@@ -27,7 +27,11 @@ pub struct DiscordToolContext {
 
 impl DiscordToolContext {
     pub fn new(http: Arc<serenity::Http>, cache: Arc<serenity::Cache>, bot_id: u64) -> Self {
-        Self { http, cache, bot_id }
+        Self {
+            http,
+            cache,
+            bot_id,
+        }
     }
 }
 
@@ -40,9 +44,18 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Add an emoji reaction to a message")
             .parameters(
                 SchemaBuilder::object()
-                    .property("channel_id", PropertyType::string().description("The channel ID where the message is"))
-                    .property("message_id", PropertyType::string().description("The message ID to react to"))
-                    .property("emoji", PropertyType::string().description("The emoji to add (unicode or custom)"))
+                    .property(
+                        "channel_id",
+                        PropertyType::string().description("The channel ID where the message is"),
+                    )
+                    .property(
+                        "message_id",
+                        PropertyType::string().description("The message ID to react to"),
+                    )
+                    .property(
+                        "emoji",
+                        PropertyType::string().description("The emoji to add (unicode or custom)"),
+                    )
                     .required("channel_id")
                     .required("message_id")
                     .required("emoji")
@@ -61,7 +74,10 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Get information about a Discord user")
             .parameters(
                 SchemaBuilder::object()
-                    .property("user_id", PropertyType::string().description("The user's ID"))
+                    .property(
+                        "user_id",
+                        PropertyType::string().description("The user's ID"),
+                    )
                     .required("user_id")
                     .build(),
             )
@@ -78,9 +94,18 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Create a new thread from a message")
             .parameters(
                 SchemaBuilder::object()
-                    .property("channel_id", PropertyType::string().description("The channel ID where the message is"))
-                    .property("message_id", PropertyType::string().description("The message ID to create thread from"))
-                    .property("name", PropertyType::string().description("The name of the thread"))
+                    .property(
+                        "channel_id",
+                        PropertyType::string().description("The channel ID where the message is"),
+                    )
+                    .property(
+                        "message_id",
+                        PropertyType::string().description("The message ID to create thread from"),
+                    )
+                    .property(
+                        "name",
+                        PropertyType::string().description("The name of the thread"),
+                    )
                     .required("channel_id")
                     .required("message_id")
                     .required("name")
@@ -99,9 +124,18 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Edit one of the bot's messages")
             .parameters(
                 SchemaBuilder::object()
-                    .property("channel_id", PropertyType::string().description("The channel ID"))
-                    .property("message_id", PropertyType::string().description("The message ID to edit"))
-                    .property("content", PropertyType::string().description("The new content"))
+                    .property(
+                        "channel_id",
+                        PropertyType::string().description("The channel ID"),
+                    )
+                    .property(
+                        "message_id",
+                        PropertyType::string().description("The message ID to edit"),
+                    )
+                    .property(
+                        "content",
+                        PropertyType::string().description("The new content"),
+                    )
                     .required("channel_id")
                     .required("message_id")
                     .required("content")
@@ -120,8 +154,14 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Pin a message in a channel")
             .parameters(
                 SchemaBuilder::object()
-                    .property("channel_id", PropertyType::string().description("The channel ID"))
-                    .property("message_id", PropertyType::string().description("The message ID to pin"))
+                    .property(
+                        "channel_id",
+                        PropertyType::string().description("The channel ID"),
+                    )
+                    .property(
+                        "message_id",
+                        PropertyType::string().description("The message ID to pin"),
+                    )
                     .required("channel_id")
                     .required("message_id")
                     .build(),
@@ -139,8 +179,14 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Unpin a message in a channel")
             .parameters(
                 SchemaBuilder::object()
-                    .property("channel_id", PropertyType::string().description("The channel ID"))
-                    .property("message_id", PropertyType::string().description("The message ID to unpin"))
+                    .property(
+                        "channel_id",
+                        PropertyType::string().description("The channel ID"),
+                    )
+                    .property(
+                        "message_id",
+                        PropertyType::string().description("The message ID to unpin"),
+                    )
                     .required("channel_id")
                     .required("message_id")
                     .build(),
@@ -158,9 +204,22 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Get message history from a channel")
             .parameters(
                 SchemaBuilder::object()
-                    .property("channel_id", PropertyType::string().description("The channel ID"))
-                    .property("limit", PropertyType::integer().description("Number of messages to retrieve (max 100)").minimum(1).maximum(100))
-                    .property("before_message_id", PropertyType::string().description("Optional message ID to get messages before"))
+                    .property(
+                        "channel_id",
+                        PropertyType::string().description("The channel ID"),
+                    )
+                    .property(
+                        "limit",
+                        PropertyType::integer()
+                            .description("Number of messages to retrieve (max 100)")
+                            .minimum(1)
+                            .maximum(100),
+                    )
+                    .property(
+                        "before_message_id",
+                        PropertyType::string()
+                            .description("Optional message ID to get messages before"),
+                    )
                     .required("channel_id")
                     .required("limit")
                     .build(),
@@ -178,7 +237,10 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Get information about a Discord server (guild)")
             .parameters(
                 SchemaBuilder::object()
-                    .property("guild_id", PropertyType::string().description("The guild ID"))
+                    .property(
+                        "guild_id",
+                        PropertyType::string().description("The guild ID"),
+                    )
                     .required("guild_id")
                     .build(),
             )
@@ -195,7 +257,10 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Get information about a Discord channel")
             .parameters(
                 SchemaBuilder::object()
-                    .property("channel_id", PropertyType::string().description("The channel ID"))
+                    .property(
+                        "channel_id",
+                        PropertyType::string().description("The channel ID"),
+                    )
                     .required("channel_id")
                     .build(),
             )
@@ -212,8 +277,14 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Join a voice channel (placeholder - voice not yet implemented)")
             .parameters(
                 SchemaBuilder::object()
-                    .property("guild_id", PropertyType::string().description("The guild ID"))
-                    .property("channel_id", PropertyType::string().description("The voice channel ID"))
+                    .property(
+                        "guild_id",
+                        PropertyType::string().description("The guild ID"),
+                    )
+                    .property(
+                        "channel_id",
+                        PropertyType::string().description("The voice channel ID"),
+                    )
                     .required("guild_id")
                     .required("channel_id")
                     .build(),
@@ -230,7 +301,10 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
             .description("Leave a voice channel (placeholder - voice not yet implemented)")
             .parameters(
                 SchemaBuilder::object()
-                    .property("guild_id", PropertyType::string().description("The guild ID"))
+                    .property(
+                        "guild_id",
+                        PropertyType::string().description("The guild ID"),
+                    )
                     .required("guild_id")
                     .build(),
             )
@@ -243,7 +317,9 @@ pub fn register_all(registry: &mut ToolRegistry, ctx: DiscordToolContext) {
 
 /// Helper trait for tools that need Discord context
 pub trait DiscordTool: ToolHandler {
-    fn with_context(ctx: DiscordToolContext) -> Self where Self: Sized;
+    fn with_context(ctx: DiscordToolContext) -> Self
+    where
+        Self: Sized;
 }
 
 /// Parse a channel ID from string

@@ -5,6 +5,7 @@ use argon2::{
 use base58::ToBase58;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use thiserror::Error;
 
 const TOKEN_PREFIX: &str = "nysa_";
@@ -28,6 +29,12 @@ pub enum TokenError {
 pub struct Token {
     pub prefix: String,
     pub data: Vec<u8>,
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", self.prefix, self.data.to_base58())
+    }
 }
 
 impl Token {
@@ -55,10 +62,6 @@ impl Token {
             prefix: TOKEN_PREFIX.to_string(),
             data,
         })
-    }
-
-    pub fn to_string(&self) -> String {
-        format!("{}{}", self.prefix, self.data.to_base58())
     }
 
     pub fn hash(&self) -> Result<String, TokenError> {

@@ -83,6 +83,7 @@ struct CompactionConfigSection {
 struct ProviderSection {
     base_url: Option<String>,
     api_key: Option<String>,
+    #[allow(dead_code)]
     summary_model: Option<String>,
 }
 
@@ -163,11 +164,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ai_config) = config.ai {
         tracing::info!("Configuring AI with model: {}", ai_config.chat_model);
 
-        let provider = Provider::new(
-            "main",
-            ai_config.base_url,
-            ai_config.api_key,
-        );
+        let provider = Provider::new("main", ai_config.base_url, ai_config.api_key);
 
         let chat = nysa_core::config::ai::ChatConfig {
             provider: None,
@@ -182,55 +179,69 @@ async fn main() -> anyhow::Result<()> {
             },
         };
 
-        let embedding_config: Option<nysa_core::config::ai::EmbeddingConfig> = if let Some(embedding) = ai_config.embedding {
-            let embedding_provider = if let (Some(base_url), Some(api_key)) = (&embedding.base_url, &embedding.api_key) {
-                Some(Provider::new("embedding", base_url.clone(), api_key.clone()))
-            } else {
-                None
-            };
-
-            Some(nysa_core::config::ai::EmbeddingConfig {
-                provider: embedding_provider,
-                model: embedding.model.clone(),
-                dimensions: embedding.dimensions,
-                encoding_format: None,
-            })
-        } else {
-            None
-        };
-
-        let compaction_config: nysa_core::config::ai::CompactionConfig = if let Some(compaction) = ai_config.compaction {
-            let compaction_provider = if let Some(ref prov) = compaction.provider {
-                if let (Some(base_url), Some(api_key)) = (&prov.base_url, &prov.api_key) {
-                    Some(Provider::new("compaction", base_url.clone(), api_key.clone()))
+        let embedding_config: Option<nysa_core::config::ai::EmbeddingConfig> =
+            if let Some(embedding) = ai_config.embedding {
+                let embedding_provider = if let (Some(base_url), Some(api_key)) =
+                    (&embedding.base_url, &embedding.api_key)
+                {
+                    Some(Provider::new(
+                        "embedding",
+                        base_url.clone(),
+                        api_key.clone(),
+                    ))
                 } else {
                     None
-                }
+                };
+
+                Some(nysa_core::config::ai::EmbeddingConfig {
+                    provider: embedding_provider,
+                    model: embedding.model.clone(),
+                    dimensions: embedding.dimensions,
+                    encoding_format: None,
+                })
             } else {
                 None
             };
 
-            nysa_core::config::ai::CompactionConfig {
-                enabled: compaction.enabled.unwrap_or(true),
-                auto_threshold: compaction.auto_threshold.unwrap_or(0.75),
-                max_messages_to_summarize: compaction.max_messages_to_summarize.unwrap_or(50),
-                preserve_recent: compaction.preserve_recent.unwrap_or(10),
-                summary_model: compaction.summary_model,
-                provider: compaction_provider,
-            }
-        } else {
-            nysa_core::config::ai::CompactionConfig::default()
-        };
+        let compaction_config: nysa_core::config::ai::CompactionConfig =
+            if let Some(compaction) = ai_config.compaction {
+                let compaction_provider = if let Some(ref prov) = compaction.provider {
+                    if let (Some(base_url), Some(api_key)) = (&prov.base_url, &prov.api_key) {
+                        Some(Provider::new(
+                            "compaction",
+                            base_url.clone(),
+                            api_key.clone(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                nysa_core::config::ai::CompactionConfig {
+                    enabled: compaction.enabled.unwrap_or(true),
+                    auto_threshold: compaction.auto_threshold.unwrap_or(0.75),
+                    max_messages_to_summarize: compaction.max_messages_to_summarize.unwrap_or(50),
+                    preserve_recent: compaction.preserve_recent.unwrap_or(10),
+                    summary_model: compaction.summary_model,
+                    provider: compaction_provider,
+                }
+            } else {
+                nysa_core::config::ai::CompactionConfig::default()
+            };
 
         let ai_builder = AiConfigBuilder::new()
             .provider(provider)
             .chat(chat)
-            .embedding(embedding_config.unwrap_or_else(|| nysa_core::config::ai::EmbeddingConfig {
-                provider: None,
-                model: String::new(),
-                dimensions: None,
-                encoding_format: None,
-            }))
+            .embedding(
+                embedding_config.unwrap_or_else(|| nysa_core::config::ai::EmbeddingConfig {
+                    provider: None,
+                    model: String::new(),
+                    dimensions: None,
+                    encoding_format: None,
+                }),
+            )
             .compaction(compaction_config);
 
         app_builder = app_builder.ai(ai_builder.build()?);

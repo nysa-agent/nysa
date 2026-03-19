@@ -1,16 +1,18 @@
+use async_openai::types::FunctionCall;
 use async_openai::types::{
     ChatCompletionMessageToolCall, ChatCompletionRequestMessage, ChatCompletionToolType,
 };
-use async_openai::types::FunctionCall;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set, Order,
-    QueryOrder, PaginatorTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait,
+    QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
 
-use crate::database::entities::message::{ActiveModel as MessageActiveModel, Column, Entity as MessageEntity};
-use crate::llm::types::*;
+use crate::database::entities::message::{
+    ActiveModel as MessageActiveModel, Column, Entity as MessageEntity,
+};
 use crate::llm::tokenizer::estimate_messages_tokens;
+use crate::llm::types::*;
 
 /// Service for managing message history in conversations
 pub struct MessageHistoryService {
@@ -36,17 +38,19 @@ impl MessageHistoryService {
             // Note: SeaORM doesn't have a direct limit method that takes usize easily
             // So we'll fetch all and truncate
             let messages: Vec<_> = query.all(&self.db).await?;
-            let messages: Vec<_> = messages.into_iter()
-                .rev()
-                .take(limit)
-                .rev()
-                .collect();
-            
-            return Ok(messages.into_iter().map(Self::db_to_conversation_message).collect());
+            let messages: Vec<_> = messages.into_iter().rev().take(limit).rev().collect();
+
+            return Ok(messages
+                .into_iter()
+                .map(Self::db_to_conversation_message)
+                .collect());
         }
 
         let messages = query.all(&self.db).await?;
-        Ok(messages.into_iter().map(Self::db_to_conversation_message).collect())
+        Ok(messages
+            .into_iter()
+            .map(Self::db_to_conversation_message)
+            .collect())
     }
 
     /// Get the most recent N messages for a thread
@@ -61,7 +65,8 @@ impl MessageHistoryService {
             .all(&self.db)
             .await?;
 
-        let messages: Vec<_> = messages.into_iter()
+        let messages: Vec<_> = messages
+            .into_iter()
             .take(count)
             .rev()
             .map(Self::db_to_conversation_message)
@@ -79,7 +84,7 @@ impl MessageHistoryService {
         author_id: Option<Uuid>,
     ) -> Result<Uuid, LlmError> {
         let message_id = Uuid::new_v4();
-        
+
         let message = MessageActiveModel {
             id: Set(message_id),
             thread_id: Set(thread_id),
@@ -104,11 +109,12 @@ impl MessageHistoryService {
         tool_calls: Option<Vec<ToolCallRecord>>,
     ) -> Result<Uuid, LlmError> {
         let message_id = Uuid::new_v4();
-        
+
         let final_content = match tool_calls {
             Some(ref calls) => {
-                let calls_json = serde_json::to_string(calls)
-                    .map_err(|e| LlmError::SerializationError(format!("Failed to serialize tool calls: {}", e)))?;
+                let calls_json = serde_json::to_string(calls).map_err(|e| {
+                    LlmError::SerializationError(format!("Failed to serialize tool calls: {}", e))
+                })?;
                 if let Some(text) = content {
                     format!("{}\n\n[Tool Calls: {}]", text, calls_json)
                 } else {
@@ -143,9 +149,12 @@ impl MessageHistoryService {
         result: &str,
     ) -> Result<Uuid, LlmError> {
         let message_id = Uuid::new_v4();
-        
+
         // Format: include tool_call_id for proper OpenAI API compatibility
-        let content = format!("[Tool {} (ID: {}) Result]: {}", tool_name, tool_call_id, result);
+        let content = format!(
+            "[Tool {} (ID: {}) Result]: {}",
+            tool_name, tool_call_id, result
+        );
 
         let message = MessageActiveModel {
             id: Set(message_id),
@@ -169,7 +178,7 @@ impl MessageHistoryService {
             .filter(Column::ThreadId.eq(thread_id))
             .exec(&self.db)
             .await?;
-        
+
         Ok(result.rows_affected)
     }
 
@@ -179,7 +188,7 @@ impl MessageHistoryService {
             .filter(Column::ThreadId.eq(thread_id))
             .count(&self.db)
             .await?;
-        
+
         Ok(count)
     }
 
@@ -195,45 +204,55 @@ impl MessageHistoryService {
         &self,
         messages: Vec<ConversationMessage>,
     ) -> Result<Vec<ChatCompletionRequestMessage>, LlmError> {
-        use crate::llm::client::{create_user_message, create_system_message, create_assistant_message, create_tool_message};
+        use crate::llm::client::{
+            create_assistant_message, create_system_message, create_tool_message,
+            create_user_message,
+        };
 
-        messages.into_iter().map(|msg| {
-            match msg.role {
-                MessageRole::System => Ok(create_system_message(&msg.content)),
-                MessageRole::User => Ok(create_user_message(&msg.content)),
-                MessageRole::Assistant => {
-                    // Check if this has embedded tool calls
-                    let (content, tool_calls) = if let Some(ref calls) = msg.tool_calls {
-                        let openai_calls: Vec<_> = calls.iter().map(|call| {
-                            ChatCompletionMessageToolCall {
-                                id: call.id.clone(),
-                                r#type: ChatCompletionToolType::Function,
-                                function: FunctionCall {
-                                    name: call.name.clone(),
-                                    arguments: call.arguments.clone(),
-                                },
-                            }
-                        }).collect();
-                        (Some(msg.content.clone()), Some(openai_calls))
-                    } else {
-                        (Some(msg.content), None)
-                    };
-                    
-                    Ok(create_assistant_message(content, tool_calls))
+        messages
+            .into_iter()
+            .map(|msg| {
+                match msg.role {
+                    MessageRole::System => Ok(create_system_message(&msg.content)),
+                    MessageRole::User => Ok(create_user_message(&msg.content)),
+                    MessageRole::Assistant => {
+                        // Check if this has embedded tool calls
+                        let (content, tool_calls) = if let Some(ref calls) = msg.tool_calls {
+                            let openai_calls: Vec<_> = calls
+                                .iter()
+                                .map(|call| ChatCompletionMessageToolCall {
+                                    id: call.id.clone(),
+                                    r#type: ChatCompletionToolType::Function,
+                                    function: FunctionCall {
+                                        name: call.name.clone(),
+                                        arguments: call.arguments.clone(),
+                                    },
+                                })
+                                .collect();
+                            (Some(msg.content.clone()), Some(openai_calls))
+                        } else {
+                            (Some(msg.content), None)
+                        };
+
+                        Ok(create_assistant_message(content, tool_calls))
+                    }
+                    MessageRole::Tool => {
+                        // Extract tool call ID from the content if possible
+                        let tool_call_id = msg
+                            .tool_call_id
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string());
+                        Ok(create_tool_message(tool_call_id, &msg.content))
+                    }
                 }
-                MessageRole::Tool => {
-                    // Extract tool call ID from the content if possible
-                    let tool_call_id = msg.tool_call_id
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string());
-                    Ok(create_tool_message(tool_call_id, &msg.content))
-                }
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     /// Convert database model to conversation message
-    fn db_to_conversation_message(db_msg: crate::database::entities::message::Model) -> ConversationMessage {
+    fn db_to_conversation_message(
+        db_msg: crate::database::entities::message::Model,
+    ) -> ConversationMessage {
         let role = match db_msg.role.as_str() {
             "system" => MessageRole::System,
             "assistant" => MessageRole::Assistant,
@@ -260,7 +279,12 @@ impl MessageHistoryService {
 
         // Clean content if it has tool call formatting
         let content = if tool_calls.is_some() {
-            db_msg.content.split("\n\n[Tool Calls:").next().unwrap_or(&db_msg.content).to_string()
+            db_msg
+                .content
+                .split("\n\n[Tool Calls:")
+                .next()
+                .unwrap_or(&db_msg.content)
+                .to_string()
         } else {
             db_msg.content
         };
@@ -283,7 +307,7 @@ impl MessageHistoryService {
         content: &str,
     ) -> Result<Uuid, LlmError> {
         let message_id = Uuid::new_v4();
-        
+
         let message = MessageActiveModel {
             id: Set(message_id),
             thread_id: Set(thread_id),
@@ -308,17 +332,20 @@ mod tests {
     #[test]
     fn test_role_parsing() {
         assert!(matches!(
-            MessageHistoryService::db_to_conversation_message(crate::database::entities::message::Model {
-                id: Uuid::new_v4(),
-                thread_id: Uuid::new_v4(),
-                platform_message_id: None,
-                author_internal_id: None,
-                author_platform_id: None,
-                author_name: "Test".to_string(),
-                content: "Hello".to_string(),
-                role: "user".to_string(),
-                created_at: chrono::Utc::now().naive_utc(),
-            }).role,
+            MessageHistoryService::db_to_conversation_message(
+                crate::database::entities::message::Model {
+                    id: Uuid::new_v4(),
+                    thread_id: Uuid::new_v4(),
+                    platform_message_id: None,
+                    author_internal_id: None,
+                    author_platform_id: None,
+                    author_name: "Test".to_string(),
+                    content: "Hello".to_string(),
+                    role: "user".to_string(),
+                    created_at: chrono::Utc::now().naive_utc(),
+                }
+            )
+            .role,
             MessageRole::User
         ));
     }

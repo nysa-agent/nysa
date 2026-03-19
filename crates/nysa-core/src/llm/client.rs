@@ -1,14 +1,13 @@
-use async_openai::{
-    types::*,
-    Client as OpenAIClient,
-};
+use async_openai::{Client as OpenAIClient, types::*};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
 
-use crate::config::ai::{AiConfig, ChatOptions, NysaOpenAiConfig, ChatProvider, SummarizationProvider};
-use crate::llm::types::*;
+use crate::config::ai::{
+    AiConfig, ChatOptions, ChatProvider, NysaOpenAiConfig, SummarizationProvider,
+};
 use crate::llm::tokenizer::estimate_messages_tokens;
+use crate::llm::types::*;
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = Result<StreamDelta, LlmError>> + Send>>;
 
@@ -68,11 +67,7 @@ impl LlmClient {
     ) -> Result<LlmResponse, LlmError> {
         let request = self.build_request(model, messages, tools)?;
 
-        let response = self
-            .client
-            .chat()
-            .create(request)
-            .await?;
+        let response = self.client.chat().create(request).await?;
 
         self.parse_response(response)
     }
@@ -87,37 +82,32 @@ impl LlmClient {
         let mut stream_request = request;
         stream_request.stream = Some(true);
 
-        let stream = self
-            .client
-            .chat()
-            .create_stream(stream_request)
-            .await?;
+        let stream = self.client.chat().create_stream(stream_request).await?;
 
-        let mapped_stream = stream.map(|result| {
-            match result {
-                Ok(chunk) => {
-                    let delta = chunk.choices.get(0).map(|choice| {
-                        StreamDelta {
-                            content: choice.delta.content.clone(),
-                            tool_calls: choice.delta.tool_calls.as_ref().map(|calls| {
-                                calls.iter().map(|call| ToolCallDelta {
-                                    index: call.index as usize,
-                                    id: call.id.clone(),
-                                    name: call.function.as_ref().and_then(|f| f.name.clone()),
-                                    arguments: call.function.as_ref().and_then(|f| f.arguments.clone()),
-                                }).collect()
-                            }),
-                            finish_reason: choice.finish_reason.clone(),
-                        }
-                    });
-                    
-                    match delta {
-                        Some(d) => Ok(d),
-                        None => Err(LlmError::NoResponse),
-                    }
+        let mapped_stream = stream.map(|result| match result {
+            Ok(chunk) => {
+                let delta = chunk.choices.first().map(|choice| StreamDelta {
+                    content: choice.delta.content.clone(),
+                    tool_calls: choice.delta.tool_calls.as_ref().map(|calls| {
+                        calls
+                            .iter()
+                            .map(|call| ToolCallDelta {
+                                index: call.index as usize,
+                                id: call.id.clone(),
+                                name: call.function.as_ref().and_then(|f| f.name.clone()),
+                                arguments: call.function.as_ref().and_then(|f| f.arguments.clone()),
+                            })
+                            .collect()
+                    }),
+                    finish_reason: choice.finish_reason,
+                });
+
+                match delta {
+                    Some(d) => Ok(d),
+                    None => Err(LlmError::NoResponse),
                 }
-                Err(e) => Err(LlmError::StreamingError(e.to_string())),
             }
+            Err(e) => Err(LlmError::StreamingError(e.to_string())),
         });
 
         Ok(Box::pin(mapped_stream))
@@ -162,7 +152,8 @@ impl LlmClient {
         &self,
         response: CreateChatCompletionResponse,
     ) -> Result<LlmResponse, LlmError> {
-        let choice = response.choices
+        let choice = response
+            .choices
             .into_iter()
             .next()
             .ok_or(LlmError::NoResponse)?;

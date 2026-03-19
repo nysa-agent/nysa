@@ -88,7 +88,7 @@ pub struct SystemPrompt {
 
 impl SystemPrompt {
     /// Create the default friendly companion prompt
-    pub fn default() -> Self {
+    pub fn default_prompt() -> Self {
         Self {
             base_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
             custom_sections: Vec::new(),
@@ -182,7 +182,7 @@ impl SystemPrompt {
 
 impl Default for SystemPrompt {
     fn default() -> Self {
-        Self::default()
+        Self::default_prompt()
     }
 }
 

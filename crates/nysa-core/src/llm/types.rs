@@ -11,16 +11,11 @@ pub enum MessageRole {
     Tool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ResponseMode {
+    #[default]
     Batch,
     Stream,
-}
-
-impl Default for ResponseMode {
-    fn default() -> Self {
-        ResponseMode::Batch
-    }
 }
 
 #[derive(Debug, Clone)]

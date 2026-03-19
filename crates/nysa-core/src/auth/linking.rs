@@ -6,11 +6,9 @@ use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::auth::{
-    generate_linking_code, hash_linking_code, verify_linking_code, TokenError,
-};
-use crate::database::entities::linking_code::{ActiveModel as LinkingCodeActiveModel, Column};
+use crate::auth::{TokenError, generate_linking_code, hash_linking_code, verify_linking_code};
 use crate::database::entities::linking_code::Entity as LinkingCodeEntity;
+use crate::database::entities::linking_code::{ActiveModel as LinkingCodeActiveModel, Column};
 
 const LINKING_CODE_EXPIRY_MINUTES: i64 = 5;
 
@@ -51,12 +49,11 @@ impl LinkingCodeService {
             .one(&self.db)
             .await?;
 
-        if let Some(user) = user {
-            if let Some(profiles) = user.linked_profiles.as_object() {
-                if profiles.contains_key(platform) {
-                    return Err(LinkingCodeError::PlatformAlreadyLinked);
-                }
-            }
+        if let Some(user) = user
+            && let Some(profiles) = user.linked_profiles.as_object()
+            && profiles.contains_key(platform)
+        {
+            return Err(LinkingCodeError::PlatformAlreadyLinked);
         }
 
         // Generate a unique code
@@ -74,8 +71,9 @@ impl LinkingCodeService {
 
             if existing.is_none() {
                 // Create the linking code record
-                let expires_at = Utc::now() + Duration::from_secs(LINKING_CODE_EXPIRY_MINUTES as u64 * 60);
-                
+                let expires_at =
+                    Utc::now() + Duration::from_secs(LINKING_CODE_EXPIRY_MINUTES as u64 * 60);
+
                 let linking_code = LinkingCodeActiveModel {
                     id: NotSet,
                     code_hash: Set(code_hash),
@@ -128,14 +126,14 @@ impl LinkingCodeService {
 
         // Link the platform profile to the user
         let user_id = linking_code.user_id;
-        
+
         let user = crate::database::entities::user::Entity::find_by_id(user_id)
             .one(&self.db)
             .await?;
 
         if let Some(user) = user {
             let mut profiles = user.linked_profiles.clone();
-            
+
             if let Some(obj) = profiles.as_object_mut() {
                 obj.insert(
                     platform.to_string(),
@@ -183,11 +181,9 @@ impl LinkingCodeService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Note: These tests would need a test database to run
     // They're placeholders for the actual implementation structure
-    
+
     #[test]
     fn test_linking_code_service_new() {
         // Just verify the service can be created

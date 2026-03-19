@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SchemaType {
+    #[default]
     Object,
     Array,
     String,
@@ -12,12 +13,6 @@ pub enum SchemaType {
     Integer,
     Boolean,
     Null,
-}
-
-impl Default for SchemaType {
-    fn default() -> Self {
-        Self::Object
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -162,7 +157,7 @@ impl PropertyType {
 
     pub fn items(mut self, items: PropertyType) -> Self {
         if let PropertyType::Array { items: inner, .. } = &mut self {
-            *inner = Box::new(items);
+            **inner = items;
         }
         self
     }

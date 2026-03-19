@@ -2,11 +2,12 @@ pub mod ai;
 pub mod extensions;
 
 pub use ai::{
-    AiConfig, AiConfigBuilder, ChatOptions, ChatProvider, CompactionConfig,
-    EmbeddingConfig, EmbeddingConfigBuilder, NysaOpenAiConfig, Provider, SummarizationProvider,
+    AiConfig, AiConfigBuilder, ChatOptions, ChatProvider, CompactionConfig, EmbeddingConfig,
+    EmbeddingConfigBuilder, NysaOpenAiConfig, Provider, SummarizationProvider,
 };
 pub use extensions::{ExtensionConfig, ExtensionConfigRegistry};
 
+#[derive(Default)]
 pub struct Config {
     pub ai: Option<AiConfig>,
     pub extensions: ExtensionConfigRegistry,
@@ -15,15 +16,6 @@ pub struct Config {
 impl Config {
     pub fn builder() -> ConfigBuilder {
         ConfigBuilder::new()
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            ai: None,
-            extensions: ExtensionConfigRegistry::new(),
-        }
     }
 }
 

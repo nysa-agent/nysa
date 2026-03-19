@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use async_openai::types::{ChatCompletionRequestMessage, EncodingFormat};
-use reqwest::header::{HeaderMap, AUTHORIZATION};
+use reqwest::header::{AUTHORIZATION, HeaderMap};
 use secrecy::{ExposeSecret, SecretString};
 
 const NYSA_REFERER: &str = "https://nysa.phrolova.moe/";
@@ -76,8 +76,12 @@ impl EmbeddingConfig {
         self.provider.as_ref().unwrap_or(default)
     }
 
-    pub fn create_client_config<'a>(&self, default_provider: &'a Provider) -> impl async_openai::config::Config + 'a {
-        self.provider_or_default(default_provider).to_openai_config()
+    pub fn create_client_config<'a>(
+        &self,
+        default_provider: &'a Provider,
+    ) -> impl async_openai::config::Config + 'a {
+        self.provider_or_default(default_provider)
+            .to_openai_config()
     }
 }
 
@@ -295,7 +299,9 @@ impl AiConfigBuilder {
             .provider
             .ok_or_else(|| anyhow!("provider is required"))?;
 
-        let chat = self.chat.ok_or_else(|| anyhow!("chat config is required"))?;
+        let chat = self
+            .chat
+            .ok_or_else(|| anyhow!("chat config is required"))?;
         let mut embedding = self.embedding.unwrap_or(EmbeddingConfig {
             provider: None,
             model: String::new(),

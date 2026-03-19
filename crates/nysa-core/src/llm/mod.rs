@@ -15,34 +15,18 @@ pub mod tokenizer;
 pub mod types;
 
 // Re-export main types
-pub use client::{
-    LlmClient, 
-    create_user_message,
-    create_system_message, 
-    create_assistant_message,
-    create_tool_message,
-};
 pub use crate::config::NysaOpenAiConfig;
+pub use client::{
+    LlmClient, create_assistant_message, create_system_message, create_tool_message,
+    create_user_message,
+};
 pub use conversation::ConversationManager;
 pub use history::MessageHistoryService;
 pub use prompt::{SystemPrompt, load_system_prompt};
 pub use tokenizer::{
-    estimate_tokens,
-    estimate_messages_tokens,
-    is_approaching_limit,
-    calculate_remaining_tokens,
+    calculate_remaining_tokens, estimate_messages_tokens, estimate_tokens, is_approaching_limit,
 };
 pub use types::{
-    Author,
-    ConversationMessage,
-    ConversationResponse,
-    LlmConfig,
-    LlmError,
-    LlmResponse,
-    MessageRole,
-    ResponseMode,
-    StreamDelta,
-    ToolCallRecord,
-    ToolExecution,
-    ToolResultMessage,
+    Author, ConversationMessage, ConversationResponse, LlmConfig, LlmError, LlmResponse,
+    MessageRole, ResponseMode, StreamDelta, ToolCallRecord, ToolExecution, ToolResultMessage,
 };

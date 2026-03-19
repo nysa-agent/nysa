@@ -358,14 +358,11 @@ async fn event_handler(
                 handle_guild_message(ctx, new_message, data, user_uuid, is_mention).await?;
             }
         }
-        serenity::FullEvent::InteractionCreate { interaction } => {
-            // Handle interactions if needed
-            if let serenity::Interaction::Component(component) = interaction {
-                tracing::debug!(
-                    "Received component interaction: {:?}",
-                    component.data.custom_id
-                );
-            }
+        serenity::FullEvent::InteractionCreate { interaction: serenity::Interaction::Component(component) } => {
+            tracing::debug!(
+                "Received component interaction: {:?}",
+                component.data.custom_id
+            );
         }
         _ => {}
     }

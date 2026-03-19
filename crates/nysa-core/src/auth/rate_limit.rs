@@ -25,8 +25,8 @@ impl RateLimitEntry {
     }
 
     fn is_expired(&self, window_duration: Duration) -> bool {
-        let window_end = self.window_start + chrono::Duration::from_std(window_duration)
-            .unwrap_or(chrono::Duration::minutes(15));
+        let window_end = self.window_start
+            + chrono::Duration::from_std(window_duration).unwrap_or(chrono::Duration::minutes(15));
         Utc::now() > window_end
     }
 
@@ -35,19 +35,15 @@ impl RateLimitEntry {
     }
 
     fn count_in_window(&self, window_duration: Duration) -> usize {
-        let cutoff = Utc::now() - chrono::Duration::from_std(window_duration)
-            .unwrap_or(chrono::Duration::minutes(15));
+        let cutoff = Utc::now()
+            - chrono::Duration::from_std(window_duration).unwrap_or(chrono::Duration::minutes(15));
         self.attempts.iter().filter(|&&t| t > cutoff).count()
     }
 
     fn get_oldest_attempt_in_window(&self, window_duration: Duration) -> Option<DateTime<Utc>> {
-        let cutoff = Utc::now() - chrono::Duration::from_std(window_duration)
-            .unwrap_or(chrono::Duration::minutes(15));
-        self.attempts
-            .iter()
-            .filter(|&&t| t > cutoff)
-            .min()
-            .copied()
+        let cutoff = Utc::now()
+            - chrono::Duration::from_std(window_duration).unwrap_or(chrono::Duration::minutes(15));
+        self.attempts.iter().filter(|&&t| t > cutoff).min().copied()
     }
 
     fn reset(&mut self) {
@@ -102,7 +98,12 @@ impl RateLimiter {
 
     /// Check if a user is rate limited
     pub fn check_user(&self, user_id: &str) -> RateLimitResult {
-        self.check_limit(user_id, &self.user_attempts, self.user_max_attempts, self.user_window)
+        self.check_limit(
+            user_id,
+            &self.user_attempts,
+            self.user_max_attempts,
+            self.user_window,
+        )
     }
 
     /// Record a user attempt
@@ -123,7 +124,7 @@ impl RateLimiter {
     /// Check both user and IP limits
     pub fn check_both(&self, user_id: &str, ip: Option<&str>) -> RateLimitResult {
         let user_result = self.check_user(user_id);
-        
+
         if !user_result.allowed {
             return user_result;
         }
@@ -174,13 +175,13 @@ impl RateLimiter {
         }
 
         let attempts_in_window = entry.count_in_window(window) as u32;
-        
+
         if attempts_in_window >= max_attempts {
             // Calculate retry_after
             let oldest_attempt = entry.get_oldest_attempt_in_window(window);
             let retry_after = oldest_attempt.map(|oldest| {
-                let window_end = oldest + chrono::Duration::from_std(window)
-                    .unwrap_or(chrono::Duration::minutes(15));
+                let window_end = oldest
+                    + chrono::Duration::from_std(window).unwrap_or(chrono::Duration::minutes(15));
                 let now = Utc::now();
                 if window_end > now {
                     let diff = window_end - now;
@@ -204,14 +205,8 @@ impl RateLimiter {
         }
     }
 
-    fn record_attempt(
-        &self,
-        key: &str,
-        map: &DashMap<String, RateLimitEntry>,
-        window: Duration,
-    ) {
-        map
-            .entry(key.to_string())
+    fn record_attempt(&self, key: &str, map: &DashMap<String, RateLimitEntry>, window: Duration) {
+        map.entry(key.to_string())
             .and_modify(|entry| {
                 if entry.is_expired(window) {
                     entry.reset();
@@ -234,17 +229,17 @@ impl RateLimiter {
 
         tokio::spawn(async move {
             let mut cleanup_interval = interval(Duration::from_secs(CLEANUP_INTERVAL_MINUTES * 60));
-            
+
             loop {
                 cleanup_interval.tick().await;
-                
+
                 // Clean up expired user entries
                 let expired_users: Vec<String> = user_attempts
                     .iter()
                     .filter(|entry| entry.is_expired(user_window))
                     .map(|entry| entry.key().clone())
                     .collect();
-                
+
                 for key in expired_users {
                     user_attempts.remove(&key);
                 }
@@ -255,7 +250,7 @@ impl RateLimiter {
                     .filter(|entry| entry.is_expired(ip_window))
                     .map(|entry| entry.key().clone())
                     .collect();
-                
+
                 for key in expired_ips {
                     ip_attempts.remove(&key);
                 }
@@ -284,7 +279,6 @@ impl Default for RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_rate_limiting() {
