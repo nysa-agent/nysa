@@ -105,15 +105,17 @@ impl MessageHistoryService {
     ) -> Result<Uuid, LlmError> {
         let message_id = Uuid::new_v4();
         
-        // Store tool calls as JSON in content if present
-        let final_content = if let Some(ref calls) = tool_calls {
-            if let Some(content) = content {
-                format!("{}\n\n[Tool Calls: {}]", content, serde_json::to_string(calls).unwrap_or_default())
-            } else {
-                format!("[Tool Calls: {}]", serde_json::to_string(calls).unwrap_or_default())
+        let final_content = match tool_calls {
+            Some(ref calls) => {
+                let calls_json = serde_json::to_string(calls)
+                    .map_err(|e| LlmError::SerializationError(format!("Failed to serialize tool calls: {}", e)))?;
+                if let Some(text) = content {
+                    format!("{}\n\n[Tool Calls: {}]", text, calls_json)
+                } else {
+                    format!("[Tool Calls: {}]", calls_json)
+                }
             }
-        } else {
-            content.unwrap_or("").to_string()
+            None => content.unwrap_or("").to_string(),
         };
 
         let message = MessageActiveModel {

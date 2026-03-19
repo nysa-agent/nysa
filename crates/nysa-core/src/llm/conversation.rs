@@ -181,14 +181,6 @@ impl ConversationManager {
 
         // Start streaming
         let stream = self.llm.stream(messages, None).await?;
-        
-        // Collect the full response in a separate task
-        tokio::spawn(async move {
-            let _full_content = String::new();
-            
-            // Note: In a real implementation, we'd need to properly handle the stream
-            // and collect the full content. This is simplified.
-        });
 
         Ok(stream.map(|delta_result| {
             match delta_result {
