@@ -2,13 +2,13 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 
 use crate::auth::{
-    generate_token, hash_token, verify_token, LinkingCodeService, LinkingCodeError,
+    generate_token, hash_token, verify_token, compute_lookup_hash, LinkingCodeService, LinkingCodeError,
     RateLimiter, RateLimitResult, SessionManager, Session, SessionError,
 };
-use crate::database::entities::user::{ActiveModel as UserActiveModel, Entity as UserEntity};
+use crate::database::entities::user::{ActiveModel as UserActiveModel, Column, Entity as UserEntity};
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -96,6 +96,7 @@ impl AuthService {
         
         let token_hash = hash_token(&token)
             .map_err(|e| AuthError::Database(sea_orm::DbErr::Custom(e.to_string())))?;
+        let lookup_hash = compute_lookup_hash(&token);
         
         let user = UserActiveModel {
             id: Set(user_id),
@@ -103,6 +104,7 @@ impl AuthService {
             linked_profiles: Set(serde_json::json!({})),
             preferences: Set(serde_json::json!({})),
             token_hash: Set(token_hash),
+            lookup_hash: Set(lookup_hash),
         };
         
         user.insert(&self.db).await?;
@@ -119,17 +121,20 @@ impl AuthService {
             return Err(AuthError::InvalidToken);
         }
         
-        // Find user by verifying token hash
-        let users = UserEntity::find().all(&self.db).await?;
+        let lookup_hash = compute_lookup_hash(token);
         
-        for user in users {
-            if verify_token(token, &user.token_hash) {
-                tracing::info!("Successfully authenticated user {}", user.id);
-                return Ok(user.id);
-            }
+        let user = UserEntity::find()
+            .filter(Column::LookupHash.eq(lookup_hash))
+            .one(&self.db)
+            .await?
+            .ok_or(AuthError::InvalidToken)?;
+        
+        if verify_token(token, &user.token_hash) {
+            tracing::info!("Successfully authenticated user {}", user.id);
+            Ok(user.id)
+        } else {
+            Err(AuthError::InvalidToken)
         }
-        
-        Err(AuthError::InvalidToken)
     }
 
     /// Create a session after successful authentication
@@ -235,6 +240,8 @@ impl AuthService {
     }
 
     /// Find user by platform ID
+    /// Note: This is O(n) with current schema. For better performance,
+    /// a separate platform_links table with proper indexing would be needed.
     pub async fn find_user_by_platform(
         &self, 
         platform: &str, 

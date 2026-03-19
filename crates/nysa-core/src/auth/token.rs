@@ -98,6 +98,13 @@ pub fn verify_token(token: &str, hash: &str) -> bool {
         .unwrap_or(false)
 }
 
+pub fn compute_lookup_hash(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 /// Generate a shorter linking code for cross-platform auth
 pub fn generate_linking_code() -> String {
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";

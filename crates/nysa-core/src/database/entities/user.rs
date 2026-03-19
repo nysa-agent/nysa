@@ -9,6 +9,8 @@ pub struct Model {
     pub linked_profiles: Json,
     pub preferences: Json,
     pub token_hash: String,
+    #[sea_orm(index)]
+    pub lookup_hash: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
