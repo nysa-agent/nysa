@@ -11,7 +11,7 @@ use tracing_subscriber::{
 };
 
 use crate::auth::AuthService;
-use crate::compaction::CompactionManager;
+use crate::compaction::{CompactionManager, CompactionService};
 use crate::config::{AiConfig, Config};
 use crate::extension::{EventBus, Extension, ExtensionContext, ExtensionFactoryRegistry, ExtensionManager};
 use crate::llm::{ConversationManager, LlmClient, LlmConfig, MessageHistoryService};
@@ -191,19 +191,19 @@ impl AppBuilder {
         let config = Arc::new(self.config);
 
         let auth_service = AuthService::new(self.database.clone());
-        let compaction_manager = CompactionManager::new(self.database.clone());
 
         // Build conversation manager if AI is configured
         let conversation_manager = if let Some(ref ai_config) = config.ai {
             info!("Building conversation manager with AI configuration");
 
-            let llm_client = Arc::new(LlmClient::new(&ai_config.chat));
+            let llm_client = Arc::new(LlmClient::from_config(ai_config));
             let history_service = Arc::new(MessageHistoryService::new(self.database.clone()));
-            let compaction_service = compaction_manager.service();
+            let compaction_service = CompactionService::new(self.database.clone(), ai_config);
 
             let llm_config = LlmConfig {
                 max_context_tokens: 120_000,
-                compaction_threshold: 0.8,
+                compaction_enabled: ai_config.compaction.enabled,
+                compaction_threshold: ai_config.compaction.auto_threshold,
                 max_tool_iterations: 10,
                 default_mode: crate::llm::ResponseMode::Batch,
                 system_prompt_override: None,
@@ -221,6 +221,12 @@ impl AppBuilder {
             None
         };
 
+        let compaction_manager = if config.ai.is_some() {
+            Some(CompactionManager::new(self.database.clone()))
+        } else {
+            None
+        };
+
         let ctx = ExtensionContext::new(
             self.database.clone(),
             config.clone(),
@@ -228,8 +234,13 @@ impl AppBuilder {
             Arc::clone(&tool_registry),
             Arc::clone(&event_bus),
         )
-        .with_auth_service(auth_service)
-        .with_compaction_manager(compaction_manager);
+        .with_auth_service(auth_service);
+
+        let ctx = if let Some(manager) = compaction_manager {
+            ctx.with_compaction_manager(manager)
+        } else {
+            ctx
+        };
 
         let ctx = if let Some(ref manager) = conversation_manager {
             ctx.with_conversation_manager(Arc::clone(manager))

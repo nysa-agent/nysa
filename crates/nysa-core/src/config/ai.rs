@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use async_openai::types::{EncodingFormat, Stop};
+use async_openai::types::{ChatCompletionRequestMessage, EncodingFormat};
 use reqwest::header::{HeaderMap, AUTHORIZATION};
 use secrecy::{ExposeSecret, SecretString};
 
@@ -7,17 +7,24 @@ const NYSA_REFERER: &str = "https://nysa.phrolova.moe/";
 const NYSA_TITLE: &str = "Nysa";
 
 #[derive(Clone)]
-pub struct AiConfig {
-    pub chat: ChatConfig,
-    pub embedding: EmbeddingConfig,
+pub struct Provider {
+    pub name: String,
+    pub base_url: String,
+    pub api_key: SecretString,
 }
 
-#[derive(Clone)]
-pub struct ChatConfig {
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
-    pub options: ChatOptions,
+impl Provider {
+    pub fn new(name: impl Into<String>, base_url: String, api_key: String) -> Self {
+        Self {
+            name: name.into(),
+            base_url,
+            api_key: SecretString::from(api_key),
+        }
+    }
+
+    pub fn to_openai_config(&self) -> NysaOpenAiConfig {
+        NysaOpenAiConfig::new(self.base_url.clone(), self.api_key.clone())
+    }
 }
 
 #[derive(Clone)]
@@ -43,95 +50,171 @@ impl Default for ChatOptions {
     }
 }
 
+#[derive(Clone)]
+pub struct ChatConfig {
+    pub provider: Option<Provider>,
+    pub model: String,
+    pub options: ChatOptions,
+}
+
 impl ChatConfig {
-    pub fn to_openai_request(
-        &self,
-        messages: Vec<async_openai::types::ChatCompletionRequestMessage>,
-    ) -> async_openai::types::CreateChatCompletionRequest {
-        self.to_openai_request_with_tools(messages, None)
-    }
-
-    pub fn to_openai_request_with_tools(
-        &self,
-        messages: Vec<async_openai::types::ChatCompletionRequestMessage>,
-        tools: Option<Vec<async_openai::types::ChatCompletionTool>>,
-    ) -> async_openai::types::CreateChatCompletionRequest {
-        use async_openai::types::CreateChatCompletionRequest;
-
-        let mut request = CreateChatCompletionRequest {
-            model: self.model.clone(),
-            messages,
-            ..Default::default()
-        };
-
-        if let Some(temp) = self.options.temperature {
-            request.temperature = Some(temp);
-        }
-        if let Some(top_p) = self.options.top_p {
-            request.top_p = Some(top_p);
-        }
-        if let Some(max_tokens) = self.options.max_completion_tokens {
-            request.max_completion_tokens = Some(max_tokens);
-        }
-        if let Some(freq_pen) = self.options.frequency_penalty {
-            request.frequency_penalty = Some(freq_pen);
-        }
-        if let Some(pres_pen) = self.options.presence_penalty {
-            request.presence_penalty = Some(pres_pen);
-        }
-        if !self.options.stop_sequences.is_empty() {
-            request.stop = Some(Stop::StringArray(self.options.stop_sequences.clone()));
-        }
-        if let Some(tools) = tools {
-            request.tools = Some(tools);
-        }
-
-        request
-    }
-
-    pub fn create_client_config(&self) -> impl async_openai::config::Config {
-        NysaOpenAiConfig {
-            base_url: self.base_url.clone(),
-            api_key: SecretString::from(self.api_key.clone()),
-        }
+    pub fn provider_or_default<'a>(&'a self, default: &'a Provider) -> &'a Provider {
+        self.provider.as_ref().unwrap_or(default)
     }
 }
 
 #[derive(Clone)]
 pub struct EmbeddingConfig {
-    pub base_url: String,
-    pub api_key: String,
+    pub provider: Option<Provider>,
     pub model: String,
     pub dimensions: Option<u32>,
     pub encoding_format: Option<EncodingFormat>,
 }
 
 impl EmbeddingConfig {
-    pub fn to_openai_request(
-        &self,
-        input: async_openai::types::EmbeddingInput,
-    ) -> async_openai::types::CreateEmbeddingRequest {
-        async_openai::types::CreateEmbeddingRequest {
-            model: self.model.clone(),
-            input,
-            dimensions: self.dimensions,
-            encoding_format: self.encoding_format.clone(),
-            user: None,
-        }
+    pub fn provider_or_default<'a>(&'a self, default: &'a Provider) -> &'a Provider {
+        self.provider.as_ref().unwrap_or(default)
     }
 
-    pub fn create_client_config(&self) -> impl async_openai::config::Config {
-        NysaOpenAiConfig {
-            base_url: self.base_url.clone(),
-            api_key: SecretString::from(self.api_key.clone()),
-        }
+    pub fn create_client_config<'a>(&self, default_provider: &'a Provider) -> impl async_openai::config::Config + 'a {
+        self.provider_or_default(default_provider).to_openai_config()
     }
 }
 
 #[derive(Clone)]
-struct NysaOpenAiConfig {
+pub struct CompactionConfig {
+    pub enabled: bool,
+    pub auto_threshold: f32,
+    pub max_messages_to_summarize: usize,
+    pub preserve_recent: usize,
+    pub provider: Option<Provider>,
+    pub summary_model: Option<String>,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_threshold: 0.75,
+            max_messages_to_summarize: 50,
+            preserve_recent: 10,
+            provider: None,
+            summary_model: None,
+        }
+    }
+}
+
+impl CompactionConfig {
+    pub fn provider_or_default<'a>(&'a self, default: &'a Provider) -> &'a Provider {
+        self.provider.as_ref().unwrap_or(default)
+    }
+
+    pub fn summary_model_or_default<'a>(&'a self, default: &'a str) -> &'a str {
+        self.summary_model.as_deref().unwrap_or(default)
+    }
+}
+
+#[derive(Clone)]
+pub struct AiConfig {
+    pub provider: Provider,
+    pub chat: ChatConfig,
+    pub embedding: EmbeddingConfig,
+    pub compaction: CompactionConfig,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        let default_provider = Provider::new("default", String::new(), String::new());
+        Self {
+            provider: default_provider.clone(),
+            chat: ChatConfig {
+                provider: None,
+                model: String::new(),
+                options: ChatOptions::default(),
+            },
+            embedding: EmbeddingConfig {
+                provider: None,
+                model: String::new(),
+                dimensions: None,
+                encoding_format: None,
+            },
+            compaction: CompactionConfig::default(),
+        }
+    }
+}
+
+impl AiConfig {
+    pub fn chat_provider(&self) -> &Provider {
+        self.chat.provider_or_default(&self.provider)
+    }
+
+    pub fn embedding_provider(&self) -> &Provider {
+        self.embedding.provider_or_default(&self.provider)
+    }
+
+    pub fn compaction_provider(&self) -> &Provider {
+        self.compaction.provider_or_default(&self.provider)
+    }
+
+    pub fn chat_model_or_default(&self) -> &str {
+        if self.chat.model.is_empty() {
+            "gpt-4o"
+        } else {
+            &self.chat.model
+        }
+    }
+
+    pub fn embedding_model_or_default(&self) -> String {
+        if self.embedding.model.is_empty() {
+            "text-embedding-3-small".to_string()
+        } else {
+            self.embedding.model.clone()
+        }
+    }
+
+    pub fn compaction_model_or_default(&self) -> &str {
+        self.compaction
+            .summary_model_or_default(self.chat_model_or_default())
+    }
+}
+
+#[async_trait::async_trait]
+pub trait ChatProvider: Send + Sync {
+    async fn complete(
+        &self,
+        model: &str,
+        messages: Vec<ChatCompletionRequestMessage>,
+    ) -> Result<crate::llm::types::LlmResponse, crate::llm::types::LlmError>;
+}
+
+#[async_trait::async_trait]
+pub trait EmbeddingProvider: Send + Sync {
+    async fn embed(
+        &self,
+        model: &str,
+        input: async_openai::types::EmbeddingInput,
+    ) -> Result<Vec<Vec<f32>>, crate::llm::types::LlmError>;
+}
+
+#[async_trait::async_trait]
+pub trait SummarizationProvider: Send + Sync {
+    async fn summarize(
+        &self,
+        model: &str,
+        messages: Vec<ChatCompletionRequestMessage>,
+    ) -> Result<String, crate::llm::types::LlmError>;
+}
+
+#[derive(Clone)]
+pub struct NysaOpenAiConfig {
     base_url: String,
     api_key: SecretString,
+}
+
+impl NysaOpenAiConfig {
+    pub fn new(base_url: String, api_key: SecretString) -> Self {
+        Self { base_url, api_key }
+    }
 }
 
 impl async_openai::config::Config for NysaOpenAiConfig {
@@ -165,89 +248,85 @@ impl async_openai::config::Config for NysaOpenAiConfig {
     }
 }
 
-pub struct ChatConfigBuilder {
-    base_url: Option<String>,
-    api_key: Option<String>,
-    model: Option<String>,
-    options: ChatOptions,
+pub struct AiConfigBuilder {
+    provider: Option<Provider>,
+    chat: Option<ChatConfig>,
+    embedding: Option<EmbeddingConfig>,
+    compaction: Option<CompactionConfig>,
 }
 
-impl ChatConfigBuilder {
+impl AiConfigBuilder {
     pub fn new() -> Self {
         Self {
-            base_url: None,
-            api_key: None,
-            model: None,
-            options: ChatOptions::default(),
+            provider: None,
+            chat: None,
+            embedding: None,
+            compaction: None,
         }
     }
 
-    pub fn base_url(mut self, url: impl Into<String>) -> Self {
-        self.base_url = Some(url.into());
+    pub fn provider(mut self, provider: Provider) -> Self {
+        self.provider = Some(provider);
         self
     }
 
-    pub fn api_key(mut self, key: impl Into<String>) -> Self {
-        self.api_key = Some(key.into());
+    pub fn provider_with_defaults(mut self, base_url: String, api_key: String) -> Self {
+        self.provider = Some(Provider::new("default", base_url, api_key));
         self
     }
 
-    pub fn model(mut self, model: impl Into<String>) -> Self {
-        self.model = Some(model.into());
+    pub fn chat(mut self, chat: ChatConfig) -> Self {
+        self.chat = Some(chat);
         self
     }
 
-    pub fn temperature(mut self, temp: f32) -> Self {
-        self.options.temperature = Some(temp);
+    pub fn embedding(mut self, embedding: EmbeddingConfig) -> Self {
+        self.embedding = Some(embedding);
         self
     }
 
-    pub fn top_p(mut self, top_p: f32) -> Self {
-        self.options.top_p = Some(top_p);
+    pub fn compaction(mut self, compaction: CompactionConfig) -> Self {
+        self.compaction = Some(compaction);
         self
     }
 
-    pub fn max_completion_tokens(mut self, max: u32) -> Self {
-        self.options.max_completion_tokens = Some(max);
-        self
-    }
+    pub fn build(self) -> anyhow::Result<AiConfig> {
+        let provider = self
+            .provider
+            .ok_or_else(|| anyhow!("provider is required"))?;
 
-    pub fn frequency_penalty(mut self, penalty: f32) -> Self {
-        self.options.frequency_penalty = Some(penalty);
-        self
-    }
+        let chat = self.chat.ok_or_else(|| anyhow!("chat config is required"))?;
+        let mut embedding = self.embedding.unwrap_or(EmbeddingConfig {
+            provider: None,
+            model: String::new(),
+            dimensions: None,
+            encoding_format: None,
+        });
+        if embedding.provider.is_none() {
+            embedding.provider = Some(provider.clone());
+        }
+        let mut compaction = self.compaction.unwrap_or_default();
+        if compaction.provider.is_none() {
+            compaction.provider = Some(provider.clone());
+        }
 
-    pub fn presence_penalty(mut self, penalty: f32) -> Self {
-        self.options.presence_penalty = Some(penalty);
-        self
-    }
-
-    pub fn stop_sequence(mut self, seq: impl Into<String>) -> Self {
-        self.options.stop_sequences.push(seq.into());
-        self
-    }
-
-    pub fn build(self) -> anyhow::Result<ChatConfig> {
-        Ok(ChatConfig {
-            base_url: self
-                .base_url
-                .ok_or_else(|| anyhow!("base_url is required"))?,
-            api_key: self.api_key.ok_or_else(|| anyhow!("api_key is required"))?,
-            model: self.model.ok_or_else(|| anyhow!("model is required"))?,
-            options: self.options,
+        Ok(AiConfig {
+            provider,
+            chat,
+            embedding,
+            compaction,
         })
     }
 }
 
-impl Default for ChatConfigBuilder {
+impl Default for AiConfigBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
 pub struct EmbeddingConfigBuilder {
-    base_url: Option<String>,
-    api_key: Option<String>,
+    provider: Option<Provider>,
     model: Option<String>,
     dimensions: Option<u32>,
     encoding_format: Option<EncodingFormat>,
@@ -256,21 +335,20 @@ pub struct EmbeddingConfigBuilder {
 impl EmbeddingConfigBuilder {
     pub fn new() -> Self {
         Self {
-            base_url: None,
-            api_key: None,
+            provider: None,
             model: None,
             dimensions: None,
             encoding_format: None,
         }
     }
 
-    pub fn base_url(mut self, url: impl Into<String>) -> Self {
-        self.base_url = Some(url.into());
+    pub fn provider(mut self, provider: Provider) -> Self {
+        self.provider = Some(provider);
         self
     }
 
-    pub fn api_key(mut self, key: impl Into<String>) -> Self {
-        self.api_key = Some(key.into());
+    pub fn provider_with_defaults(mut self, base_url: String, api_key: String) -> Self {
+        self.provider = Some(Provider::new("default", base_url, api_key));
         self
     }
 
@@ -290,12 +368,11 @@ impl EmbeddingConfigBuilder {
     }
 
     pub fn build(self) -> anyhow::Result<EmbeddingConfig> {
+        let model = self.model.ok_or_else(|| anyhow!("model is required"))?;
+
         Ok(EmbeddingConfig {
-            base_url: self
-                .base_url
-                .ok_or_else(|| anyhow!("base_url is required"))?,
-            api_key: self.api_key.ok_or_else(|| anyhow!("api_key is required"))?,
-            model: self.model.ok_or_else(|| anyhow!("model is required"))?,
+            provider: self.provider,
+            model,
             dimensions: self.dimensions,
             encoding_format: self.encoding_format,
         })
@@ -303,47 +380,6 @@ impl EmbeddingConfigBuilder {
 }
 
 impl Default for EmbeddingConfigBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct AiConfigBuilder {
-    chat: Option<ChatConfig>,
-    embedding: Option<EmbeddingConfig>,
-}
-
-impl AiConfigBuilder {
-    pub fn new() -> Self {
-        Self {
-            chat: None,
-            embedding: None,
-        }
-    }
-
-    pub fn chat(mut self, config: ChatConfig) -> Self {
-        self.chat = Some(config);
-        self
-    }
-
-    pub fn embedding(mut self, config: EmbeddingConfig) -> Self {
-        self.embedding = Some(config);
-        self
-    }
-
-    pub fn build(self) -> anyhow::Result<AiConfig> {
-        Ok(AiConfig {
-            chat: self
-                .chat
-                .ok_or_else(|| anyhow!("chat config is required"))?,
-            embedding: self
-                .embedding
-                .ok_or_else(|| anyhow!("embedding config is required"))?,
-        })
-    }
-}
-
-impl Default for AiConfigBuilder {
     fn default() -> Self {
         Self::new()
     }

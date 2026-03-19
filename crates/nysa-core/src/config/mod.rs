@@ -2,8 +2,8 @@ pub mod ai;
 pub mod extensions;
 
 pub use ai::{
-    AiConfig, AiConfigBuilder, ChatConfig, ChatConfigBuilder, ChatOptions, EmbeddingConfig,
-    EmbeddingConfigBuilder,
+    AiConfig, AiConfigBuilder, ChatOptions, ChatProvider, CompactionConfig,
+    EmbeddingConfig, EmbeddingConfigBuilder, NysaOpenAiConfig, Provider, SummarizationProvider,
 };
 pub use extensions::{ExtensionConfig, ExtensionConfigRegistry};
 

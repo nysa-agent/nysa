@@ -26,6 +26,7 @@ impl Default for ResponseMode {
 #[derive(Debug, Clone)]
 pub struct LlmConfig {
     pub max_context_tokens: usize,
+    pub compaction_enabled: bool,
     pub compaction_threshold: f32,
     pub max_tool_iterations: u8,
     pub default_mode: ResponseMode,
@@ -36,7 +37,8 @@ impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             max_context_tokens: 120_000,
-            compaction_threshold: 0.8,
+            compaction_enabled: true,
+            compaction_threshold: 0.75,
             max_tool_iterations: 10,
             default_mode: ResponseMode::Batch,
             system_prompt_override: None,
@@ -69,6 +71,9 @@ pub enum LlmError {
 
     #[error("Streaming error: {0}")]
     StreamingError(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
 }
 
 impl From<sea_orm::DbErr> for LlmError {
