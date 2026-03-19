@@ -1,4 +1,3 @@
-use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -196,8 +195,7 @@ pub struct TaskStatus {
 }
 
 pub struct ExtensionManager {
-    extensions: HashMap<TypeId, ExtensionHolder>,
-    extensions_by_name: HashMap<&'static str, TypeId>,
+    extensions: HashMap<&'static str, ExtensionHolder>,
     background_tasks: Vec<TaskHandle>,
     shutdown_timeout: Duration,
     cancellation_token: CancellationToken,
@@ -207,7 +205,6 @@ impl ExtensionManager {
     pub fn new() -> Self {
         Self {
             extensions: HashMap::new(),
-            extensions_by_name: HashMap::new(),
             background_tasks: Vec::new(),
             shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
             cancellation_token: CancellationToken::new(),
@@ -224,23 +221,19 @@ impl ExtensionManager {
     }
 
     pub fn register<E: Extension>(&mut self, extension: E) {
-        let type_id = TypeId::of::<E>();
+        let name = extension.name();
         let holder: ExtensionHolder = Arc::new(extension) as Arc<dyn Extension>;
-        self.extensions.insert(type_id, holder.clone());
-        self.extensions_by_name.insert(holder.name(), type_id);
+        self.extensions.insert(name, holder);
     }
 
     pub fn register_boxed(&mut self, extension: Box<dyn Extension>) {
         let holder: ExtensionHolder = Arc::from(extension);
-        let type_id = TypeId::of::<Box<dyn Extension>>();
-        self.extensions.insert(type_id, holder.clone());
-        self.extensions_by_name.insert(holder.name(), type_id);
+        self.extensions.insert(holder.name(), holder);
     }
 
     pub fn get_by_name(&self, name: &str) -> Option<&dyn Extension> {
-        self.extensions_by_name
+        self.extensions
             .get(name)
-            .and_then(|type_id| self.extensions.get(type_id))
             .map(|e| e.as_ref())
     }
 
@@ -249,11 +242,11 @@ impl ExtensionManager {
     }
 
     pub fn names(&self) -> Vec<&'static str> {
-        self.extensions_by_name.keys().copied().collect()
+        self.extensions.keys().copied().collect()
     }
 
     pub fn is_registered(&self, name: &str) -> bool {
-        self.extensions_by_name.contains_key(name)
+        self.extensions.contains_key(name)
     }
 
     pub fn find(&self, predicate: impl Fn(&dyn Extension) -> bool) -> Vec<&dyn Extension> {

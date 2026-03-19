@@ -84,8 +84,8 @@ impl ExtensionContext {
         let state = self.state.read();
         state
             .get(&TypeId::of::<T>())
-            .and_then(|v| v.downcast_ref::<Arc<T>>())
-            .cloned()
+            .and_then(|v| v.clone().downcast::<Arc<T>>().ok())
+            .map(Arc::unwrap_or_clone)
     }
 
     pub fn spawn_task<F>(&self, name: &str, future: F) -> tokio::task::JoinHandle<()>
