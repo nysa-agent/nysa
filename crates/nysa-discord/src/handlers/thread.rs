@@ -6,6 +6,11 @@ use uuid::Uuid;
 
 use crate::models::ThreadState;
 
+struct ProcessingLock {
+    lock: Arc<Mutex<()>>,
+    last_accessed: chrono::DateTime<Utc>,
+}
+
 /// Manager for Discord conversation threads
 /// Handles creation, lifecycle, and revival of threads
 pub struct ThreadManager {
@@ -18,7 +23,7 @@ pub struct ThreadManager {
     /// Thread timeout duration (30 minutes of inactivity)
     thread_timeout: Duration,
     /// Per-channel processing locks to guarantee sequential message handling
-    processing_locks: Arc<RwLock<HashMap<u64, Arc<Mutex<()>>>>>,
+    processing_locks: Arc<RwLock<HashMap<u64, ProcessingLock>>>,
 }
 
 /// Represents a thread creation context
@@ -64,21 +69,22 @@ impl ThreadManager {
         let threads_by_uuid: Arc<RwLock<HashMap<Uuid, ThreadState>>> =
             Arc::new(RwLock::new(HashMap::new()));
         let user_threads: Arc<RwLock<HashMap<u64, Uuid>>> = Arc::new(RwLock::new(HashMap::new()));
-        let processing_locks: Arc<RwLock<HashMap<u64, Arc<Mutex<()>>>>> =
+        let processing_locks: Arc<RwLock<HashMap<u64, ProcessingLock>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
         let threads_clone = Arc::clone(&active_threads);
         let uuid_clone = Arc::clone(&threads_by_uuid);
         let user_threads_clone = Arc::clone(&user_threads);
+        let locks_clone = Arc::clone(&processing_locks);
 
-        // Start cleanup task for inactive threads
+        // Start cleanup task for inactive threads and stale locks
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
 
                 let now = Utc::now();
-                let timeout = Duration::minutes(30);
+                let thread_timeout = Duration::minutes(30);
 
                 let mut threads = threads_clone.write().await;
                 let mut uuid_threads = uuid_clone.write().await;
@@ -87,7 +93,7 @@ impl ThreadManager {
                 // Find expired threads
                 let expired: Vec<u64> = threads
                     .iter()
-                    .filter(|(_, state)| now.signed_duration_since(state.last_message_at) > timeout)
+                    .filter(|(_, state)| now.signed_duration_since(state.last_message_at) > thread_timeout)
                     .map(|(id, _)| *id)
                     .collect();
 
@@ -101,6 +107,11 @@ impl ThreadManager {
                         tracing::info!("Thread {} timed out and was archived", state.id);
                     }
                 }
+
+                // Clean up stale processing locks (not accessed in 1 hour)
+                let lock_timeout = Duration::hours(1);
+                let mut locks = locks_clone.write().await;
+                locks.retain(|_, lock| now.signed_duration_since(lock.last_accessed) <= lock_timeout);
             }
         });
 
@@ -449,18 +460,20 @@ impl ThreadManager {
     /// Callers can lock it to enforce sequential processing for a channel.
     pub async fn get_or_create_processing_lock(&self, channel_id: u64) -> Arc<Mutex<()>> {
         {
-            let locks = self.processing_locks.read().await;
-            if let Some(lock) = locks.get(&channel_id) {
-                return Arc::clone(lock);
+            let mut locks = self.processing_locks.write().await;
+            if let Some(lock) = locks.get_mut(&channel_id) {
+                lock.last_accessed = Utc::now();
+                return Arc::clone(&lock.lock);
             }
-        }
 
-        let mut locks = self.processing_locks.write().await;
-        Arc::clone(
-            locks
-                .entry(channel_id)
-                .or_insert_with(|| Arc::new(Mutex::new(()))),
-        )
+            let new_lock = ProcessingLock {
+                lock: Arc::new(Mutex::new(())),
+                last_accessed: Utc::now(),
+            };
+            let lock = Arc::clone(&new_lock.lock);
+            locks.insert(channel_id, new_lock);
+            lock
+        }
     }
 
     /// Register a conversational thread against a specific Discord channel key.

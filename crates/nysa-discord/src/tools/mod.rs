@@ -1,7 +1,6 @@
-use nysa_core::{ToolRegistry, ToolDefinition, ToolHandler, ToolResult, ToolError};
-use nysa_core::{PropertyType, SchemaBuilder, async_trait};
+use nysa_core::{ToolRegistry, ToolDefinition, ToolHandler};
+use nysa_core::{PropertyType, SchemaBuilder};
 use poise::serenity_prelude as serenity;
-use serde_json::Value;
 use std::sync::Arc;
 
 mod reaction;

@@ -4,7 +4,6 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::models::{ChannelMode, DmMode, DiscordConfig, ProactiveState, ThreadState};
-use crate::handlers::auth::AuthenticatedUser;
 
 pub struct DiscordMessageHandler {
     config: DiscordConfig,
@@ -131,15 +130,6 @@ impl DiscordMessageHandler {
     /// Get unauth message template
     pub fn unauth_embed(&self) -> &crate::models::UnauthMessageTemplate {
         &self.config.unauth_message
-    }
-
-    /// Check if user is authenticated (helper method)
-    pub async fn is_authenticated(&self, discord_id: u64, _db: &sea_orm::DatabaseConnection) -> bool {
-        // This is a simplified check - in practice you'd use AuthMiddleware
-        // This method is kept for backwards compatibility
-        tracing::debug!("Checking authentication for Discord user {}", discord_id);
-        // TODO: Integrate with AuthMiddleware properly
-        true // Placeholder - will be replaced by actual auth check
     }
 
     /// Get or create a thread for a user in a channel

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use chrono::Utc;
-use rand::Rng;
 
 use crate::models::ProactiveState;
 
@@ -60,7 +59,7 @@ impl ProactiveManager {
         let mut states = self.states.write().await;
         
         if let Some(state) = states.get_mut(&discord_user_id) {
-            state.last_message_at = Utc::now();
+            state.record_message();
         }
     }
 
@@ -69,14 +68,7 @@ impl ProactiveManager {
         let states = self.states.read().await;
         
         if let Some(state) = states.get(&discord_user_id) {
-            let now = Utc::now();
-            let elapsed = (now - state.last_message_at).num_seconds();
-            
-            // Generate random interval for this check
-            let mut rng = rand::thread_rng();
-            let random_interval = rng.gen_range(state.min_interval_seconds..state.max_interval_seconds);
-            
-            elapsed >= random_interval
+            state.should_send()
         } else {
             false
         }

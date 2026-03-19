@@ -1,16 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 use chrono::Utc;
-
-use crate::models::ChannelMode;
 
 /// Handler for "Evaluate All" mode
 /// In this mode, every message is evaluated by the LLM to determine
 /// if a response is warranted
 pub struct EvaluateAllHandler {
-    recent_messages: Arc<RwLock<HashMap<u64, Vec<RecentMessage>>>>,
+    recent_messages: Arc<RwLock<HashMap<u64, VecDeque<RecentMessage>>>>,
     context_window_size: usize,
 }
 
@@ -48,7 +45,7 @@ pub struct ResponseCriteria {
 
 impl EvaluateAllHandler {
     pub fn new() -> Self {
-        let recent_messages: Arc<RwLock<HashMap<u64, Vec<RecentMessage>>>> = Arc::new(RwLock::new(HashMap::new()));
+        let recent_messages: Arc<RwLock<HashMap<u64, VecDeque<RecentMessage>>>> = Arc::new(RwLock::new(HashMap::new()));
         let messages_clone = Arc::clone(&recent_messages);
 
         // Cleanup old messages periodically
@@ -84,7 +81,7 @@ impl EvaluateAllHandler {
         let mut messages = self.recent_messages.write().await;
         let entry = messages.entry(channel_id).or_default();
         
-        entry.push(RecentMessage {
+        entry.push_back(RecentMessage {
             content,
             author_id,
             timestamp: Utc::now(),
@@ -93,7 +90,7 @@ impl EvaluateAllHandler {
 
         // Keep only recent messages
         if entry.len() > self.context_window_size {
-            entry.remove(0);
+            entry.pop_front();
         }
     }
 
@@ -101,7 +98,7 @@ impl EvaluateAllHandler {
     pub async fn mark_responded(&self, channel_id: u64) {
         let mut messages = self.recent_messages.write().await;
         if let Some(msgs) = messages.get_mut(&channel_id) {
-            if let Some(last) = msgs.last_mut() {
+            if let Some(last) = msgs.back_mut() {
                 last.responded = true;
             }
         }
@@ -160,7 +157,7 @@ impl EvaluateAllHandler {
         &self,
         content: &str,
         author_id: u64,
-        channel_history: Option<&Vec<RecentMessage>>,
+        channel_history: Option<&VecDeque<RecentMessage>>,
     ) -> ResponseCriteria {
         let content_lower = content.to_lowercase();
         

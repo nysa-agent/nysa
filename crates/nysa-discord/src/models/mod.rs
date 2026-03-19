@@ -159,26 +159,36 @@ pub struct ProactiveState {
     pub last_message_at: chrono::DateTime<chrono::Utc>,
     pub min_interval_seconds: i64,
     pub max_interval_seconds: i64,
+    pub next_send_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl ProactiveState {
     pub fn new(user_id: Uuid, min_seconds: i64, max_seconds: i64) -> Self {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let random_interval = rng.gen_range(min_seconds..max_seconds);
+
+        let now = chrono::Utc::now();
         Self {
             user_id,
-            last_message_at: chrono::Utc::now(),
+            last_message_at: now,
             min_interval_seconds: min_seconds,
             max_interval_seconds: max_seconds,
+            next_send_at: now + chrono::Duration::seconds(random_interval),
         }
     }
 
     pub fn should_send(&self) -> bool {
         let now = chrono::Utc::now();
-        let elapsed = (now - self.last_message_at).num_seconds();
+        now >= self.next_send_at
+    }
 
+    pub fn record_message(&mut self) {
         use rand::Rng;
         let mut rng = rand::thread_rng();
         let random_interval = rng.gen_range(self.min_interval_seconds..self.max_interval_seconds);
 
-        elapsed >= random_interval
+        self.last_message_at = chrono::Utc::now();
+        self.next_send_at = self.last_message_at + chrono::Duration::seconds(random_interval);
     }
 }
