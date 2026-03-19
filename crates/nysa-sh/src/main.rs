@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use nysa_core::config::{AiConfigBuilder, ChatConfigBuilder, EmbeddingConfigBuilder};
+use nysa_core::config::{AiConfigBuilder, Provider};
 use nysa_core::{App, ToolsReady};
 use nysa_discord::models::{ChannelMode, DmMode};
 use nysa_discord::{DiscordExtension, DiscordExtensionConfig, UnauthMessage};
@@ -49,28 +49,41 @@ struct UnauthMessageConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct AiConfigSection {
-    chat: ChatConfigSection,
-    embedding: Option<EmbeddingConfigSection>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ChatConfigSection {
     base_url: String,
     api_key: String,
-    model: String,
+    chat_model: String,
     temperature: Option<f32>,
     top_p: Option<f32>,
     max_completion_tokens: Option<u32>,
     frequency_penalty: Option<f32>,
     presence_penalty: Option<f32>,
+    embedding: Option<EmbeddingConfigSection>,
+    compaction: Option<CompactionConfigSection>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct EmbeddingConfigSection {
-    base_url: String,
-    api_key: String,
+    base_url: Option<String>,
+    api_key: Option<String>,
     model: String,
     dimensions: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CompactionConfigSection {
+    enabled: Option<bool>,
+    auto_threshold: Option<f32>,
+    max_messages_to_summarize: Option<usize>,
+    preserve_recent: Option<usize>,
+    summary_model: Option<String>,
+    provider: Option<ProviderSection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProviderSection {
+    base_url: Option<String>,
+    api_key: Option<String>,
+    summary_model: Option<String>,
 }
 
 impl From<DiscordConfigSection> for DiscordExtensionConfig {
@@ -148,45 +161,77 @@ async fn main() -> anyhow::Result<()> {
 
     // Configure AI if provided
     if let Some(ai_config) = config.ai {
-        tracing::info!("Configuring AI with model: {}", ai_config.chat.model);
+        tracing::info!("Configuring AI with model: {}", ai_config.chat_model);
 
-        let mut chat_builder = ChatConfigBuilder::new()
-            .base_url(ai_config.chat.base_url)
-            .api_key(ai_config.chat.api_key)
-            .model(ai_config.chat.model);
+        let provider = Provider::new(
+            "main",
+            ai_config.base_url,
+            ai_config.api_key,
+        );
 
-        if let Some(temp) = ai_config.chat.temperature {
-            chat_builder = chat_builder.temperature(temp);
-        }
-        if let Some(top_p) = ai_config.chat.top_p {
-            chat_builder = chat_builder.top_p(top_p);
-        }
-        if let Some(max_tokens) = ai_config.chat.max_completion_tokens {
-            chat_builder = chat_builder.max_completion_tokens(max_tokens);
-        }
-        if let Some(freq_pen) = ai_config.chat.frequency_penalty {
-            chat_builder = chat_builder.frequency_penalty(freq_pen);
-        }
-        if let Some(pres_pen) = ai_config.chat.presence_penalty {
-            chat_builder = chat_builder.presence_penalty(pres_pen);
-        }
+        let chat = nysa_core::config::ai::ChatConfig {
+            provider: None,
+            model: ai_config.chat_model.clone(),
+            options: nysa_core::config::ai::ChatOptions {
+                temperature: ai_config.temperature,
+                top_p: ai_config.top_p,
+                max_completion_tokens: ai_config.max_completion_tokens,
+                frequency_penalty: ai_config.frequency_penalty,
+                presence_penalty: ai_config.presence_penalty,
+                stop_sequences: vec![],
+            },
+        };
 
-        let chat_config = chat_builder.build()?;
+        let embedding_config: Option<nysa_core::config::ai::EmbeddingConfig> = if let Some(embedding) = ai_config.embedding {
+            let embedding_provider = if let (Some(base_url), Some(api_key)) = (&embedding.base_url, &embedding.api_key) {
+                Some(Provider::new("embedding", base_url.clone(), api_key.clone()))
+            } else {
+                None
+            };
 
-        let mut ai_builder = AiConfigBuilder::new().chat(chat_config);
+            Some(nysa_core::config::ai::EmbeddingConfig {
+                provider: embedding_provider,
+                model: embedding.model.clone(),
+                dimensions: embedding.dimensions,
+                encoding_format: None,
+            })
+        } else {
+            None
+        };
 
-        if let Some(embedding) = ai_config.embedding {
-            let mut embedding_builder = EmbeddingConfigBuilder::new()
-                .base_url(embedding.base_url)
-                .api_key(embedding.api_key)
-                .model(embedding.model);
+        let compaction_config: nysa_core::config::ai::CompactionConfig = if let Some(compaction) = ai_config.compaction {
+            let compaction_provider = if let Some(ref prov) = compaction.provider {
+                if let (Some(base_url), Some(api_key)) = (&prov.base_url, &prov.api_key) {
+                    Some(Provider::new("compaction", base_url.clone(), api_key.clone()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
-            if let Some(dims) = embedding.dimensions {
-                embedding_builder = embedding_builder.dimensions(dims);
+            nysa_core::config::ai::CompactionConfig {
+                enabled: compaction.enabled.unwrap_or(true),
+                auto_threshold: compaction.auto_threshold.unwrap_or(0.75),
+                max_messages_to_summarize: compaction.max_messages_to_summarize.unwrap_or(50),
+                preserve_recent: compaction.preserve_recent.unwrap_or(10),
+                summary_model: compaction.summary_model,
+                provider: compaction_provider,
             }
+        } else {
+            nysa_core::config::ai::CompactionConfig::default()
+        };
 
-            ai_builder = ai_builder.embedding(embedding_builder.build()?);
-        }
+        let ai_builder = AiConfigBuilder::new()
+            .provider(provider)
+            .chat(chat)
+            .embedding(embedding_config.unwrap_or_else(|| nysa_core::config::ai::EmbeddingConfig {
+                provider: None,
+                model: String::new(),
+                dimensions: None,
+                encoding_format: None,
+            }))
+            .compaction(compaction_config);
 
         app_builder = app_builder.ai(ai_builder.build()?);
     } else {
