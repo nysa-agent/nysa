@@ -92,7 +92,8 @@ impl Clone for ExtensionError {
                 name: name.clone(),
                 reason: reason.clone(),
                 source: source.as_ref().map(|s| {
-                    Box::new(std::io::Error::other(s.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                    Box::new(std::io::Error::other(s.to_string()))
+                        as Box<dyn std::error::Error + Send + Sync>
                 }),
             },
             ExtensionError::StopFailed {
@@ -103,7 +104,8 @@ impl Clone for ExtensionError {
                 name: name.clone(),
                 reason: reason.clone(),
                 source: source.as_ref().map(|s| {
-                    Box::new(std::io::Error::other(s.to_string())) as Box<dyn std::error::Error + Send + Sync>
+                    Box::new(std::io::Error::other(s.to_string()))
+                        as Box<dyn std::error::Error + Send + Sync>
                 }),
             },
             ExtensionError::Timeout(a, b) => ExtensionError::Timeout(a.clone(), b.clone()),

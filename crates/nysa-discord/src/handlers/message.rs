@@ -141,7 +141,8 @@ impl DiscordMessageHandler {
         // Check if there's already an active thread in this channel for this user
         let threads = self.active_threads.read().await;
         for thread in threads.values() {
-            if thread.discord_channel_id == discord_channel_id && thread.user_id == user_uuid
+            if thread.discord_channel_id == discord_channel_id
+                && thread.user_id == user_uuid
                 && thread.is_active
             {
                 return thread.clone();
